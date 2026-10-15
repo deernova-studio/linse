@@ -15,6 +15,16 @@ struct Slot {
 
 enum ViewMode: String, CaseIterable { case result = "结果", split = "对比", original = "原图" }
 
+enum ExportRequestError: LocalizedError {
+    case busy, missingSource
+    var errorDescription: String? {
+        switch self {
+        case .busy: return "正在处理，请稍候"
+        case .missingSource: return "先导入照片"
+        }
+    }
+}
+
 struct Summary {
     var source: String
     var secs: Double
@@ -34,7 +44,8 @@ enum ThemeMode: String, CaseIterable {
 public final class AppState: ObservableObject {
     let display: Renderer
     let proxy: Renderer
-    var exporter: Renderer?
+    private let exports: ExportService
+    private var exportID: UUID?
 
     @Published var params = Params() { didSet { paramsDidChange() } }
     @Published var matched: Params?
@@ -70,22 +81,29 @@ public final class AppState: ObservableObject {
     private var undoIdx = 0
     private var undoTimer: Task<Void, Never>?
 
-    public init() {
+    public convenience init() {
+        self.init(luts: LutStore(dir: Self.dataDir.appendingPathComponent("luts", isDirectory: true)),
+                  theme: ThemeMode(rawValue: UserDefaults.standard.string(forKey: "theme") ?? "") ?? .auto)
+        loadPresets()
+        loadAISettings()
+    }
+
+    /// 注入资源库，方便测试编辑流程而不读取用户设置或钥匙串。
+    init(luts: LutStore, theme: ThemeMode = .auto) {
         do {
             display = try Renderer()
             proxy = try Renderer(device: display.device)
+            exports = ExportService(device: display.device)
         } catch {
             fatalError("Metal 不可用：\(error.localizedDescription)")
         }
-        luts = LutStore(dir: Self.dataDir.appendingPathComponent("luts", isDirectory: true))
+        self.luts = luts
         display.luts = luts
         proxy.luts = luts
         display.maskBitmaps = smartMasks
         proxy.maskBitmaps = smartMasks
         lutList = luts.list
-        loadPresets()
-        loadAISettings()
-        theme = ThemeMode(rawValue: UserDefaults.standard.string(forKey: "theme") ?? "") ?? .auto
+        self.theme = theme
     }
 
     var effectiveView: ViewMode { peekOriginal ? .original : viewMode }
@@ -372,41 +390,49 @@ public final class AppState: ObservableObject {
 
     var exportBaseName: String { ((source?.name ?? "临色") as NSString).deletingPathExtension + "_临色" }
 
-    func exportRenderer() throws -> Renderer {
-        let r = try exporter ?? Renderer(device: display.device)
-        exporter = r
-        r.luts = luts
-        r.maskBitmaps = smartMasks
-        return r
-    }
-
     /// 全尺寸渲染并写到 url；完成后在主线程回调
-    func export(_ format: ExportFormat, to url: URL, done: @escaping (CGImage) -> Void) {
-        guard busy == nil else { return flash("正在处理，请稍候") }
-        guard let source else { return flash("先导入照片") }
+    @discardableResult
+    func export(_ format: ExportFormat, to url: URL, done: @escaping (CGImage) -> Void) -> Task<Void, Never>? {
+        guard busy == nil else { flash("正在处理，请稍候"); return nil }
+        guard let source else { flash("先导入照片"); return nil }
+        let id = UUID()
+        exportID = id
         busy = "正在渲染全尺寸…"
-        let params = self.params, ci = source.ci
-        let ex = Box(try? exportRenderer())
-        Task.detached(priority: .userInitiated) { [weak self] in
+        let params = self.params, assets = ExportAssets(params: params, luts: luts, maskBitmaps: smartMasks)
+        let exports = self.exports
+        return Task(priority: .userInitiated) { [weak self] in
             do {
-                guard let r = ex.v else { throw RenderError.noDevice }
-                try r.setImage(ci: ci)
-                defer { r.releaseImage() }
-                let img = try Exporter.render(r, params, format: format) { i, n in
-                    Task { @MainActor in self?.busy = "正在渲染全尺寸… \(i)/\(n)" }
+                let img = try await exports.writeImage(source.ci, params: params, assets: assets, format: format, to: url) { [weak self] i, n in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.exportID == id else { return }
+                        self.busy = "正在渲染全尺寸… \(i)/\(n)"
+                    }
                 }
-                try Exporter.write(img, to: url, format: format)
-                await MainActor.run {
-                    self?.busy = nil
-                    done(img)
-                }
+                guard let self, self.exportID == id else { return }
+                self.exportID = nil
+                self.busy = nil
+                done(img)
             } catch {
-                await MainActor.run { self?.busy = nil; self?.flash("导出失败：\(error.localizedDescription)") }
+                guard let self, self.exportID == id else { return }
+                self.exportID = nil
+                self.busy = nil
+                self.flash("导出失败：\(error.localizedDescription)")
             }
         }
     }
 
-    func lutText(title: String) throws -> String { try Cube.bake(try exportRenderer(), params, title: title) }
+    func lutText(title: String) async throws -> String {
+        guard busy == nil else { throw ExportRequestError.busy }
+        guard source != nil else { throw ExportRequestError.missingSource }
+        let id = UUID()
+        exportID = id
+        busy = "正在导出 LUT…"
+        let params = self.params, assets = ExportAssets(params: params, luts: luts)
+        defer {
+            if exportID == id { exportID = nil; busy = nil }
+        }
+        return try await exports.lutText(params: params, assets: assets, title: title)
+    }
 
     func xmpText(name: String) -> String { XMP.make(params, name: name) }
 
@@ -448,5 +474,3 @@ public final class AppState: ObservableObject {
         }
     }
 }
-
-typealias Cube = CubeLut

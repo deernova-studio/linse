@@ -17,5 +17,6 @@ let package = Package(
         .target(name: "LinseUI", dependencies: ["LinseCore"]),
         .executableTarget(name: "LinseMac", dependencies: ["LinseUI"]),
         .testTarget(name: "LinseCoreTests", dependencies: ["LinseCore"]),
+        .testTarget(name: "LinseUITests", dependencies: ["LinseUI", "LinseCore"]),
     ]
 )

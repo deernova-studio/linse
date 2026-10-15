@@ -12,7 +12,7 @@ public struct IOSRootView: View {
     @Environment(\.horizontalSizeClass) private var hSize
     @State private var pick: PhotosPickerItem?
     @State private var tab = 0
-    @State private var share: ShareItem?
+    @State private var share: TemporaryExportFile?
 
     public init(state: AppState) { self.state = state }
 
@@ -64,7 +64,7 @@ public struct IOSRootView: View {
             if case .success(let urls) = r { state.importLUTs(urls) }
         }
         .sheet(isPresented: $state.showAISettings) { NavigationStack { ScrollView { AISettingsView(state: state).frame(maxWidth: .infinity) } } }
-        .sheet(item: $share) { ShareSheet(items: [$0.url]).ignoresSafeArea() }
+        .sheet(item: $share) { ShareSheet(file: $0).ignoresSafeArea() }
         .task { state.devAutoload() }
     }
 
@@ -83,10 +83,10 @@ public struct IOSRootView: View {
                     ForEach(ExportFormat.allCases, id: \.self) { f in
                         Button { shareImage(f) } label: { Label("分享 \(f.label)", systemImage: "square.and.arrow.up") }
                     }
-                    Button { shareText(state.exportBaseName + ".cube") { try state.lutText(title: state.exportBaseName) } } label: { Label("分享 3D LUT", systemImage: "cube") }
+                    Button { shareLUT() } label: { Label("分享 3D LUT", systemImage: "cube") }
                     Button { shareText(state.exportBaseName + ".xmp") { state.xmpText(name: state.exportBaseName) } } label: { Label("分享 Lightroom 预设", systemImage: "slider.horizontal.3") }
                 }
-                .disabled(state.source == nil)
+                .disabled(state.source == nil || state.busy != nil)
                 Section {
                     Button { state.showAISettings = true } label: { Label("AI 设置", systemImage: "gearshape") }
                     Picker(selection: $state.theme) {
@@ -156,48 +156,62 @@ public struct IOSRootView: View {
 
     // MARK: 导出
 
-    func tempURL(_ name: String) -> URL {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("export", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent(name)
-    }
-
     func shareImage(_ f: ExportFormat) {
-        let url = tempURL(state.exportBaseName + "." + f.ext)
-        state.export(f, to: url) { _ in share = ShareItem(url: url) }
+        do {
+            let file = try TemporaryExportFile(name: state.exportBaseName + "." + f.ext)
+            state.export(f, to: file.url) { _ in share = file }
+        } catch { state.flash("导出失败：\(error.localizedDescription)") }
     }
 
     func shareText(_ name: String, _ make: () throws -> String) {
         do {
-            let url = tempURL(name)
-            try make().write(to: url, atomically: true, encoding: .utf8)
-            share = ShareItem(url: url)
+            let file = try TemporaryExportFile(name: name)
+            try make().write(to: file.url, atomically: true, encoding: .utf8)
+            share = file
         } catch { state.flash("导出失败：\(error.localizedDescription)") }
     }
 
+    func shareLUT() {
+        let name = state.exportBaseName
+        Task {
+            do {
+                let text = try await state.lutText(title: name)
+                let file = try TemporaryExportFile(name: name + ".cube")
+                try text.write(to: file.url, atomically: true, encoding: .utf8)
+                share = file
+            } catch { state.flash("导出失败：\(error.localizedDescription)") }
+        }
+    }
+
     func saveToPhotos() {
-        let url = tempURL(state.exportBaseName + ".jpg")
-        state.export(.jpeg, to: url) { img in
-            PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
-                guard status == .authorized || status == .limited else {
-                    Task { @MainActor in state.flash("没有相册权限，可以在设置里打开") }
-                    return
-                }
-                PHPhotoLibrary.shared().performChanges({
-                    PHAssetCreationRequest.creationRequestForAssetFromImage(atFileURL: url)
-                }) { ok, err in
-                    Task { @MainActor in state.flash(ok ? "已存到相册 · \(img.width)×\(img.height)" : "保存失败：\(err?.localizedDescription ?? "")") }
+        do {
+            let file = try TemporaryExportFile(name: state.exportBaseName + ".jpg")
+            state.export(.jpeg, to: file.url) { img in
+                PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+                    guard status == .authorized || status == .limited else {
+                        Task { @MainActor in state.flash("没有相册权限，可以在设置里打开") }
+                        return
+                    }
+                    PHPhotoLibrary.shared().performChanges({
+                        PHAssetCreationRequest.creationRequestForAssetFromImage(atFileURL: file.url)
+                    }) { [file] ok, err in
+                        Task { @MainActor in state.flash(ok ? "已存到相册 · \(img.width)×\(img.height)" : "保存失败：\(err?.localizedDescription ?? "")") }
+                        withExtendedLifetime(file) {}
+                    }
                 }
             }
-        }
+        } catch { state.flash("导出失败：\(error.localizedDescription)") }
     }
 }
 
-struct ShareItem: Identifiable { let url: URL; var id: String { url.path } }
-
 struct ShareSheet: UIViewControllerRepresentable {
-    let items: [Any]
-    func makeUIViewController(context: Context) -> UIActivityViewController { UIActivityViewController(activityItems: items, applicationActivities: nil) }
+    let file: TemporaryExportFile
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let controller = UIActivityViewController(activityItems: [file.url], applicationActivities: nil)
+        // SwiftUI 关闭 sheet 后，系统分享流程仍可能持有控制器；随它一起保留文件。
+        controller.completionWithItemsHandler = { [file] _, _, _, _ in withExtendedLifetime(file) {} }
+        return controller
+    }
     func updateUIViewController(_ c: UIActivityViewController, context: Context) {}
 }
 

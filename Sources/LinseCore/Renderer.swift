@@ -42,12 +42,15 @@ public struct RenderOptions {
 /// 导入的 3D LUT（.cube 解析后的数据），按 id 查找
 public protocol LutProvider: AnyObject { func lut(id: String) -> CubeLut? }
 
+/// CPU 侧调用必须串行；提交到 GPU 的绘制可以重叠，已绑定的查找表不再原地修改。
 public final class Renderer {
     public let device: MTLDevice
     let queue: MTLCommandQueue
     let library: MTLLibrary
     var pipelines: [MTLPixelFormat: MTLRenderPipelineState] = [:]
-    let curveTex: MTLTexture, hslTex: MTLTexture
+    private var curveTex: MTLTexture, hslTex: MTLTexture
+    private var curveKey = Curves()
+    private var hslKey = Params().hsl
     var lutTex: MTLTexture
     var lutTexId: String?
     public private(set) var image: MTLTexture?
@@ -69,13 +72,8 @@ public final class Renderer {
         self.device = device
         queue = device.makeCommandQueue()!
         do { library = try device.makeLibrary(source: shaderSource, options: nil) } catch { throw RenderError.shader(error.localizedDescription) }
-        func tex1D(_ w: Int) -> MTLTexture {
-            let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba32Float, width: w, height: 1, mipmapped: false)
-            d.usage = .shaderRead
-            return device.makeTexture(descriptor: d)!
-        }
-        curveTex = tex1D(256)
-        hslTex = tex1D(360)
+        curveTex = try Self.lookupTexture(Curve.lut(Params()), device: device)
+        hslTex = try Self.lookupTexture(HSLTable.build(Params()), device: device)
         let d3 = MTLTextureDescriptor()
         d3.textureType = .type3D; d3.pixelFormat = .rgba32Float; d3.width = 2; d3.height = 2; d3.depth = 2; d3.usage = .shaderRead
         lutTex = device.makeTexture(descriptor: d3)!
@@ -181,8 +179,6 @@ public final class Renderer {
         u.region = opts.region
         u.gradeSh = SIMD4(gradeOffset(g.shadows), 0); u.gradeMid = SIMD4(gradeOffset(g.midtones), 0); u.gradeHi = SIMD4(gradeOffset(g.highlights), 0)
         u.gradeLum = SIMD4(Float(g.shadows.lum / 100), Float(g.midtones.lum / 100), Float(g.highlights.lum / 100), 0)
-        if doCurve { upload(Curve.lut(p), to: curveTex, width: 256) }
-        if doHsl { upload(HSLTable.build(p), to: hslTex, width: 360) }
         var mu = masks.map { m -> MaskU in
             var x = MaskU()
             x.A = SIMD4(Float(m.cx), Float(m.cy), Float(m.rx), Float(m.ry))
@@ -214,8 +210,29 @@ public final class Renderer {
         return t
     }
 
-    func upload(_ data: [Float], to t: MTLTexture, width: Int) {
-        data.withUnsafeBytes { t.replace(region: MTLRegionMake2D(0, 0, width, 1), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: width * 16) }
+    /// 纹理只在绑定前写入一次；命令缓冲持有旧纹理直到 GPU 完成，后续绘制使用新的快照。
+    private static func lookupTexture(_ data: [Float], device: MTLDevice) throws -> MTLTexture {
+        let width = data.count / 4
+        let descriptor = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba32Float, width: width, height: 1, mipmapped: false)
+        descriptor.usage = .shaderRead
+        descriptor.storageMode = .shared
+        guard let texture = device.makeTexture(descriptor: descriptor) else { throw RenderError.texture("查找表 \(width)×1") }
+        data.withUnsafeBytes {
+            texture.replace(region: MTLRegionMake2D(0, 0, width, 1), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: width * 16)
+        }
+        return texture
+    }
+
+    private func lookupTextures(_ p: Params) throws -> (MTLTexture, MTLTexture) {
+        if p.curves != curveKey {
+            curveTex = try Self.lookupTexture(Curve.lut(p), device: device)
+            curveKey = p.curves
+        }
+        if p.hsl != hslKey {
+            hslTex = try Self.lookupTexture(HSLTable.build(p), device: device)
+            hslKey = p.hsl
+        }
+        return (curveTex, hslTex)
     }
 
     func makeLut3D(_ l: CubeLut) -> MTLTexture {
@@ -229,11 +246,12 @@ public final class Renderer {
         return t
     }
 
-    /// 编码一次绘制到目标纹理（预览直接画到 drawable）
+    /// 编码一次绘制到目标纹理。命令缓冲须保留资源引用（makeCommandBuffer 的默认行为）。
     public func encode(_ p: Params, into target: MTLTexture, commandBuffer cb: MTLCommandBuffer, opts: RenderOptions = RenderOptions(), clear: MTLClearColor? = nil,
                        viewport: MTLViewport? = nil, scissor: MTLScissorRect? = nil) throws {
         guard let img = image else { return }
         let (u, masks) = uniforms(p, outWidth: Int(viewport?.width ?? Double(target.width)), opts: opts)
+        let (curve, hsl) = try lookupTextures(p)
         let rp = MTLRenderPassDescriptor()
         rp.colorAttachments[0].texture = target
         rp.colorAttachments[0].loadAction = clear == nil ? .load : .clear
@@ -247,8 +265,8 @@ public final class Renderer {
         enc.setFragmentBytes(&uu, length: MemoryLayout<Uniforms>.stride, index: 0)
         masks.withUnsafeBytes { enc.setFragmentBytes($0.baseAddress!, length: $0.count, index: 1) }
         enc.setFragmentTexture(img, index: 0)
-        enc.setFragmentTexture(curveTex, index: 1)
-        enc.setFragmentTexture(hslTex, index: 2)
+        enc.setFragmentTexture(curve, index: 1)
+        enc.setFragmentTexture(hsl, index: 2)
         enc.setFragmentTexture(lutTex, index: 3)
         for i in 0..<Params.maxMasks {
             let m = i < p.masks.count ? p.masks[i] : nil

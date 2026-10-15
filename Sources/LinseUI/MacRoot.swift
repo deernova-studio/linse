@@ -89,7 +89,7 @@ public struct MacRootView: View {
                     Button("3D LUT（.cube）") { state.saveLUT() }
                     Button("Lightroom 预设（.xmp）") { state.saveXMP() }
                 } label: { Text("导出") }
-                .disabled(state.source == nil)
+                .disabled(state.source == nil || state.busy != nil)
                 Button { state.runMatch(useAI: true) } label: { Label("AI 辅助匹配", systemImage: "sparkles").labelStyle(.titleAndIcon) }
                     .help("先让视觉模型看图给出初值和判断，再用计算精确对齐")
                     .disabled(state.source == nil || state.target == nil || state.busy != nil)
@@ -159,12 +159,16 @@ extension AppState {
     }
 
     func saveLUT() {
+        guard busy == nil else { return flash("正在处理，请稍候") }
         guard source != nil else { return flash("先导入照片") }
         guard let url = savePanel(exportBaseName + ".cube", UTType(filenameExtension: "cube")) else { return }
-        do {
-            try lutText(title: url.deletingPathExtension().lastPathComponent).write(to: url, atomically: true, encoding: .utf8)
-            flash("已导出 LUT")
-        } catch { flash("导出失败：\(error.localizedDescription)") }
+        Task {
+            do {
+                let text = try await lutText(title: url.deletingPathExtension().lastPathComponent)
+                try text.write(to: url, atomically: true, encoding: .utf8)
+                flash("已导出 LUT")
+            } catch { flash("导出失败：\(error.localizedDescription)") }
+        }
     }
 
     func saveXMP() {
