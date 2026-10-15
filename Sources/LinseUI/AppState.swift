@@ -1,4 +1,3 @@
-import AppKit
 import CoreImage
 import LinseCore
 import SwiftUI
@@ -11,7 +10,7 @@ struct Slot {
     let name: String
     let ci: CIImage
     let size: CGSize
-    let thumb: NSImage
+    let thumb: CGImage?
 }
 
 enum ViewMode: String, CaseIterable { case result = "结果", split = "对比", original = "原图" }
@@ -32,7 +31,7 @@ enum ThemeMode: String, CaseIterable {
 }
 
 @MainActor
-final class AppState: ObservableObject {
+public final class AppState: ObservableObject {
     let display: Renderer
     let proxy: Renderer
     var exporter: Renderer?
@@ -48,7 +47,7 @@ final class AppState: ObservableObject {
     @Published var peekOriginal = false
     @Published var busy: String?
     @Published var userPresets: [Preset] = []
-    @Published var thumbnails: [String: NSImage] = [:]
+    @Published var thumbnails: [String: CGImage] = [:]
     @Published var histogram: [[Float]] = []
     @Published var toast: String?
     @Published var redrawTick = 0
@@ -58,6 +57,8 @@ final class AppState: ObservableObject {
     @Published var aiSettings = AISettings()
     @Published var aiHasKey = false
     @Published var showAISettings = false
+    @Published var pickRequest: SlotKind?      // iOS：请求打开相册选图
+    @Published var showLUTImporter = false     // iOS：请求打开"文件"选 .cube
     @Published var theme: ThemeMode = .auto { didSet { applyTheme() } }
     var aiTask: Task<Void, Never>?
     let luts: LutStore
@@ -69,7 +70,7 @@ final class AppState: ObservableObject {
     private var undoIdx = 0
     private var undoTimer: Task<Void, Never>?
 
-    init() {
+    public init() {
         do {
             display = try Renderer()
             proxy = try Renderer(device: display.device)
@@ -88,6 +89,15 @@ final class AppState: ObservableObject {
     }
 
     var effectiveView: ViewMode { peekOriginal ? .original : viewMode }
+
+    /// 画布四周留白（点）；手机屏幕小，留得少一些
+    var canvasInset: CGFloat {
+        #if os(macOS)
+        24
+        #else
+        8
+        #endif
+    }
 
     // MARK: 参数变化
 
@@ -160,29 +170,34 @@ final class AppState: ObservableObject {
 
     // MARK: 载入
 
-    func open(_ kind: SlotKind) {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.image, .rawImage]
-        panel.allowsMultipleSelection = false
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        load(url, into: kind)
-    }
-
     enum SlotKind { case source, target }
 
     func load(_ url: URL, into kind: SlotKind) {
         guard busy == nil else { return flash("正在处理，请稍候") }
+        // 从"文件"App 或拖进来的文件可能需要临时访问授权
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         // Core Image 负责解码：JPEG、PNG、HEIC、TIFF、相机 RAW 都走这里，并按 EXIF 方向摆正
         guard let ci = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) else {
             return flash("打不开这张图：\(url.lastPathComponent)")
         }
+        load(ci, name: url.lastPathComponent, into: kind)
+    }
+
+    /// 相册里选的图是一段数据
+    func load(data: Data, name: String, into kind: SlotKind) {
+        guard busy == nil else { return flash("正在处理，请稍候") }
+        guard let ci = CIImage(data: data, options: [.applyOrientationProperty: true]) else { return flash("打不开这张图") }
+        load(ci, name: name, into: kind)
+    }
+
+    func load(_ ci: CIImage, name: String, into kind: SlotKind) {
+        // 原点挪到 (0,0)，后面的缩放和识别都按这个算
+        let ci = ci.transformed(by: CGAffineTransform(translationX: -ci.extent.minX, y: -ci.extent.minY))
         let ext = ci.extent
         let thumbCI = ci.transformed(by: CGAffineTransform(scaleX: 400 / max(ext.width, ext.height), y: 400 / max(ext.width, ext.height)))
-        let thumb: NSImage = {
-            guard let cg = display.ciContext.createCGImage(thumbCI, from: thumbCI.extent) else { return NSImage() }
-            return NSImage(cgImage: cg, size: .zero)
-        }()
-        let slot = Slot(name: url.lastPathComponent, ci: ci, size: ext.size, thumb: thumb)
+        let thumb = display.ciContext.createCGImage(thumbCI, from: thumbCI.extent)
+        let slot = Slot(name: name, ci: ci, size: ext.size, thumb: thumb)
         switch kind {
         case .source:
             do {
@@ -298,15 +313,14 @@ final class AppState: ObservableObject {
         }
     }
 
-    func thumbnail(for p: Preset) -> NSImage? {
+    func thumbnail(for p: Preset) -> CGImage? {
         let key = p.id + (p.createdAt.map { "\($0.timeIntervalSince1970)" } ?? "")
         if let t = thumbnails[key] { return t }
         guard source != nil, busy == nil else { return nil }
         let w = Int(proxy.imageSize.width), h = Int(proxy.imageSize.height)
         guard let px = try? proxy.renderRGBA8(p.params, width: w, height: h), let cg = Exporter.cgImage(rgba: px, width: w, height: h) else { return nil }
-        let img = NSImage(cgImage: cg, size: .zero)
-        DispatchQueue.main.async { self.thumbnails[key] = img }
-        return img
+        DispatchQueue.main.async { self.thumbnails[key] = cg }
+        return cg
     }
 
     // MARK: 预设
@@ -356,19 +370,23 @@ final class AppState: ObservableObject {
 
     // MARK: 导出
 
-    func export(_ format: ExportFormat) {
+    var exportBaseName: String { ((source?.name ?? "临色") as NSString).deletingPathExtension + "_临色" }
+
+    func exportRenderer() throws -> Renderer {
+        let r = try exporter ?? Renderer(device: display.device)
+        exporter = r
+        r.luts = luts
+        r.maskBitmaps = smartMasks
+        return r
+    }
+
+    /// 全尺寸渲染并写到 url；完成后在主线程回调
+    func export(_ format: ExportFormat, to url: URL, done: @escaping (CGImage) -> Void) {
         guard busy == nil else { return flash("正在处理，请稍候") }
         guard let source else { return flash("先导入照片") }
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = (source.name as NSString).deletingPathExtension + "_临色." + format.ext
-        panel.allowedContentTypes = [format == .jpeg ? .jpeg : format == .png ? .png : .tiff]
-        guard panel.runModal() == .OK, let url = panel.url else { return }
         busy = "正在渲染全尺寸…"
         let params = self.params, ci = source.ci
-        let ex = Box(exporter ?? (try? Renderer(device: display.device)))
-        exporter = ex.v
-        ex.v?.luts = luts
-        ex.v?.maskBitmaps = smartMasks
+        let ex = Box(try? exportRenderer())
         Task.detached(priority: .userInitiated) { [weak self] in
             do {
                 guard let r = ex.v else { throw RenderError.noDevice }
@@ -380,8 +398,7 @@ final class AppState: ObservableObject {
                 try Exporter.write(img, to: url, format: format)
                 await MainActor.run {
                     self?.busy = nil
-                    self?.flash("已导出 \(img.width)×\(img.height) \(format.label)")
-                    NSWorkspace.shared.activateFileViewerSelecting([url])
+                    done(img)
                 }
             } catch {
                 await MainActor.run { self?.busy = nil; self?.flash("导出失败：\(error.localizedDescription)") }
@@ -389,25 +406,12 @@ final class AppState: ObservableObject {
         }
     }
 
-    func exportLUT() {
-        guard source != nil else { return flash("先导入照片") }
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = ((source?.name ?? "临色") as NSString).deletingPathExtension + "_临色.cube"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            let r = try exporter ?? Renderer(device: display.device)
-            exporter = r
-            r.luts = luts
-            let text = try Cube.bake(r, params, title: url.deletingPathExtension().lastPathComponent)
-            try text.write(to: url, atomically: true, encoding: .utf8)
-            flash("已导出 LUT")
-        } catch { flash("导出失败：\(error.localizedDescription)") }
-    }
+    func lutText(title: String) throws -> String { try Cube.bake(try exportRenderer(), params, title: title) }
+
+    func xmpText(name: String) -> String { XMP.make(params, name: name) }
 
     /// 开发自测：LINSE_SOURCE / LINSE_TARGET 指定启动时载入的图，LINSE_MATCH=1 顺便跑一次匹配，LINSE_VIEW 设查看模式
     func devAutoload() {
-        // 启动时不要让第一个数值框抢焦点
-        DispatchQueue.main.async { NSApp.windows.forEach { $0.makeFirstResponder(nil) } }
         let env = ProcessInfo.processInfo.environment
         if let s = env["LINSE_SOURCE"] { load(URL(fileURLWithPath: s), into: .source) }
         if let t = env["LINSE_TARGET"] { load(URL(fileURLWithPath: t), into: .target) }
@@ -424,23 +428,13 @@ final class AppState: ObservableObject {
         if env["LINSE_AI_SETTINGS"] == "1" { showAISettings = true }
         if env["LINSE_MATCH"] == "1" { runMatch() }
         if env["LINSE_MATCH"] == "ai" { runMatch(useAI: true) }
-        if let out = env["LINSE_SNAPSHOT"] {
-            // 等匹配结束后截自己的窗口（自己的窗口不需要屏幕录制权限），然后退出
-            Task {
-                try? await Task.sleep(nanoseconds: 1_500_000_000)
-                while busy != nil { try? await Task.sleep(nanoseconds: 200_000_000) }
-                try? await Task.sleep(nanoseconds: 800_000_000)
-                guard let w = NSApp.windows.first(where: { $0.isVisible }),
-                      let cg = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(w.windowNumber), [.boundsIgnoreFraming, .bestResolution]) else { return }
-                let rep = NSBitmapImageRep(cgImage: cg)
-                try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: out))
-                if let sh = w.attachedSheet,
-                   let sc = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(sh.windowNumber), [.boundsIgnoreFraming, .bestResolution]) {
-                    try? NSBitmapImageRep(cgImage: sc).representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: out.replacingOccurrences(of: ".png", with: "-sheet.png")))
-                }
-                if env["LINSE_QUIT"] == "1" { NSApp.terminate(nil) }
-            }
-        }
+    }
+
+    /// 等处理结束（匹配、识别）再继续，开发自测截图用
+    func waitIdle() async {
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        while busy != nil { try? await Task.sleep(nanoseconds: 200_000_000) }
+        try? await Task.sleep(nanoseconds: 800_000_000)
     }
 
     // MARK: 提示

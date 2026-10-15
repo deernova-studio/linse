@@ -27,7 +27,7 @@ struct CurveEditor: View {
                 ctx.stroke(curvePath(points, size), with: .color(color), lineWidth: 1.2)
                 for p in points {
                     let c = toView(p, size)
-                    ctx.fill(Path(ellipseIn: CGRect(x: c.x - 4, y: c.y - 4, width: 8, height: 8)), with: .color(Color(nsColor: .windowBackgroundColor)))
+                    ctx.fill(Path(ellipseIn: CGRect(x: c.x - 4, y: c.y - 4, width: 8, height: 8)), with: .color(Color.appBackground))
                     ctx.stroke(Path(ellipseIn: CGRect(x: c.x - 4, y: c.y - 4, width: 8, height: 8)), with: .color(color), lineWidth: 1)
                 }
             }

@@ -5,8 +5,6 @@ import SwiftUI
 struct SidebarView: View {
     @ObservedObject var state: AppState
     @State private var tab = 0
-    @State private var naming = false
-    @State private var newName = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,7 +24,7 @@ struct SidebarView: View {
             .padding(.horizontal, 10).padding(.vertical, 8)
             Divider()
             ScrollView {
-                if tab == 0 { ChangesList(state: state).padding(14) } else { presets.padding(14) }
+                if tab == 0 { ChangesList(state: state).padding(14) } else { PresetsView(state: state).padding(14) }
             }
         }
     }
@@ -37,51 +35,6 @@ struct SidebarView: View {
         return true
     }
 
-    @ViewBuilder var presets: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if naming {
-                HStack {
-                    TextField("预设名称", text: $newName).textFieldStyle(.plain).font(.system(size: 12))
-                        .onSubmit { save() }
-                    Button("存") { save() }.buttonStyle(.plain).font(.system(size: 12))
-                    Button("取消") { naming = false }.buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
-                }
-                .padding(.vertical, 4).overlay(alignment: .bottom) { Rectangle().fill(Color.primary.opacity(0.2)).frame(height: 1) }
-            } else {
-                Button { newName = ""; naming = true } label: { Label("把当前调整存为预设", systemImage: "plus").font(.system(size: 12)) }
-                    .buttonStyle(.plain).disabled(state.source == nil)
-            }
-            if !state.userPresets.isEmpty {
-                GroupTitle("我的")
-                grid(state.userPresets)
-            }
-            GroupTitle("内置")
-            grid(Preset.builtins)
-        }
-    }
-
-    func save() { state.saveCurrentAsPreset(name: newName.trimmingCharacters(in: .whitespaces)); naming = false }
-
-    func grid(_ list: [Preset]) -> some View {
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 12) {
-            ForEach(list) { p in
-                Button { state.applyPreset(p) } label: {
-                    VStack(alignment: .leading, spacing: 5) {
-                        ZStack {
-                            Rectangle().fill(Color.primary.opacity(0.05))
-                            if let img = state.thumbnail(for: p) { Image(nsImage: img).resizable().scaledToFill() }
-                        }
-                        .frame(height: 74).clipped()
-                        .overlay(Rectangle().stroke(Color.primary.opacity(0.12), lineWidth: 1))
-                        Text(p.name).font(.system(size: 11)).lineLimit(1)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .contextMenu { if !p.builtin { Button("删除") { state.deletePreset(p) } } }
-            }
-        }
-    }
 }
 
 struct SlotView: View {
@@ -95,7 +48,7 @@ struct SlotView: View {
             VStack(alignment: .leading, spacing: 6) {
                 ZStack {
                     Rectangle().fill(Color.primary.opacity(0.04))
-                    if let s = slot { Image(nsImage: s.thumb).resizable().scaledToFill() }
+                    if let t = slot?.thumb { Image(cg: t).resizable().scaledToFill() }
                     else { Image(systemName: "plus").font(.system(size: 14, weight: .light)).foregroundStyle(.secondary) }
                 }
                 .frame(height: 84).clipped()
@@ -221,3 +174,58 @@ struct AINotes: View {
         .overlay(Rectangle().stroke(Color.primary.opacity(0.12), lineWidth: 1))
     }
 }
+
+/// 预设库：存当前调整、我的预设、内置预设，缩略图用当前原图渲染
+struct PresetsView: View {
+    @ObservedObject var state: AppState
+    var columns = 2
+    @State private var naming = false
+    @State private var newName = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if naming {
+                HStack {
+                    TextField("预设名称", text: $newName).textFieldStyle(.plain).font(.system(size: 12))
+                        .onSubmit { save() }
+                    Button("存") { save() }.buttonStyle(.plain).font(.system(size: 12))
+                    Button("取消") { naming = false }.buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4).overlay(alignment: .bottom) { Rectangle().fill(Color.primary.opacity(0.2)).frame(height: 1) }
+            } else {
+                Button { newName = ""; naming = true } label: { Label("把当前调整存为预设", systemImage: "plus").font(.system(size: 12)) }
+                    .buttonStyle(.plain).disabled(state.source == nil)
+            }
+            if !state.userPresets.isEmpty {
+                GroupTitle("我的")
+                grid(state.userPresets)
+            }
+            GroupTitle("内置")
+            grid(Preset.builtins)
+        }
+    }
+
+    func save() { state.saveCurrentAsPreset(name: newName.trimmingCharacters(in: .whitespaces)); naming = false }
+
+    func grid(_ list: [Preset]) -> some View {
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: columns), spacing: 12) {
+            ForEach(list) { p in
+                Button { state.applyPreset(p) } label: {
+                    VStack(alignment: .leading, spacing: 5) {
+                        ZStack {
+                            Rectangle().fill(Color.primary.opacity(0.05))
+                            if let img = state.thumbnail(for: p) { Image(cg: img).resizable().scaledToFill() }
+                        }
+                        .frame(height: 74).clipped()
+                        .overlay(Rectangle().stroke(Color.primary.opacity(0.12), lineWidth: 1))
+                        Text(p.name).font(.system(size: 11)).lineLimit(1)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .contextMenu { if !p.builtin { Button("删除") { state.deletePreset(p) } } }
+            }
+        }
+    }
+}
+

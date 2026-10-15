@@ -17,13 +17,13 @@ struct PanelView: View {
                         .padding(.horizontal, 14).padding(.vertical, 8)
                     Divider()
                 }
-                Section("基本", changed: basicChanged) { basic }
-                Section("色调曲线", changed: Curves.channels.contains { !Curve.isIdentity(state.params.curves[keyPath: $0]) }) { curves }
-                Section("混色器", changed: !HSLTable.isIdentity(state.params)) { hsl }
-                Section("颜色分级", changed: gradingChanged) { grading }
-                Section("滤镜 LUT", changed: state.params.lut != nil) { lut }
-                Section("效果", changed: effectsChanged) { effects }
-                Section("蒙版", changed: !state.params.masks.isEmpty) { MaskPanel(state: state) }
+                PanelSection("基本", changed: basicChanged) { basic }
+                PanelSection("色调曲线", changed: Curves.channels.contains { !Curve.isIdentity(state.params.curves[keyPath: $0]) }) { curves }
+                PanelSection("混色器", changed: !HSLTable.isIdentity(state.params)) { hsl }
+                PanelSection("颜色分级", changed: gradingChanged) { grading }
+                PanelSection("滤镜 LUT", changed: state.params.lut != nil) { lut }
+                PanelSection("效果", changed: effectsChanged) { effects }
+                PanelSection("蒙版", changed: !state.params.masks.isEmpty) { MaskPanel(state: state) }
             }
         }
         .scrollIndicators(.automatic)
@@ -227,7 +227,7 @@ struct MaskPanel: View {
 
 // MARK: - 小组件
 
-struct Section<Content: View>: View {
+struct PanelSection<Content: View>: View {
     let title: String, changed: Bool
     @ViewBuilder let content: Content
     @State private var open = true
@@ -313,7 +313,7 @@ struct ThinSlider: View {
                 Rectangle()
                     .fill(track.map { AnyShapeStyle(LinearGradient(colors: $0, startPoint: .leading, endPoint: .trailing)) } ?? AnyShapeStyle(Color.primary.opacity(0.22)))
                     .frame(height: 1)
-                Circle().strokeBorder(Color.primary, lineWidth: 1).background(Circle().fill(hover ? Color.primary : Color(nsColor: .windowBackgroundColor)))
+                Circle().strokeBorder(Color.primary, lineWidth: 1).background(Circle().fill(hover ? Color.primary : Color.appBackground))
                     .frame(width: 10, height: 10)
                     .offset(x: CGFloat(t) * (w - 10))
             }

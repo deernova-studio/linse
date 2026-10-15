@@ -3,43 +3,78 @@ import MetalKit
 import SwiftUI
 
 /// 中间的画布：MTKView 直接把调色管线画到屏幕上，按比例适配；对比模式左边原图、右边结果
-struct CanvasView: NSViewRepresentable {
+#if os(macOS)
+typealias PlatformViewRepresentable = NSViewRepresentable
+#else
+typealias PlatformViewRepresentable = UIViewRepresentable
+#endif
+
+struct CanvasView: PlatformViewRepresentable {
     @ObservedObject var state: AppState
 
     func makeCoordinator() -> Coordinator { Coordinator(state) }
 
-    func makeNSView(context: Context) -> MTKView {
+    func makeView(context: Context) -> MTKView {
         let v = MTKView(frame: .zero, device: state.display.device)
         v.delegate = context.coordinator
         v.isPaused = true
         v.enableSetNeedsDisplay = true
         v.framebufferOnly = true
         v.colorPixelFormat = .bgra8Unorm
+        #if os(macOS)
         v.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
         v.layer?.isOpaque = false
+        #else
+        v.isOpaque = false
+        v.backgroundColor = .clear
+        #endif
         context.coordinator.view = v
         return v
     }
 
-    func updateNSView(_ v: MTKView, context: Context) {
+    func updateView(_ v: MTKView, context: Context) {
         context.coordinator.state = state
+        #if os(macOS)
         v.needsDisplay = true
+        #else
+        v.setNeedsDisplay()
+        #endif
     }
+
+    #if os(macOS)
+    func makeNSView(context: Context) -> MTKView { makeView(context: context) }
+    func updateNSView(_ v: MTKView, context: Context) { updateView(v, context: context) }
+    #else
+    func makeUIView(context: Context) -> MTKView { makeView(context: context) }
+    func updateUIView(_ v: MTKView, context: Context) { updateView(v, context: context) }
+    #endif
 
     final class Coordinator: NSObject, MTKViewDelegate {
         var state: AppState
         weak var view: MTKView?
         init(_ s: AppState) { state = s }
 
-        func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) { view.needsDisplay = true }
+        func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+            #if os(macOS)
+            view.needsDisplay = true
+            #else
+            view.setNeedsDisplay()
+            #endif
+        }
 
         @MainActor
         func draw(in view: MTKView) {
             guard let drawable = view.currentDrawable, let cb = state.display.makeCommandBuffer() else { return }
-            let bg = view.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? MTLClearColor(red: 0.055, green: 0.055, blue: 0.06, alpha: 1)
-                : MTLClearColor(red: 0.957, green: 0.957, blue: 0.965, alpha: 1)
+            #if os(macOS)
+            let dark = view.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            let scale = view.window?.backingScaleFactor ?? 2
+            #else
+            let dark = view.traitCollection.userInterfaceStyle == .dark
+            let scale = view.contentScaleFactor
+            #endif
+            let bg = dark ? MTLClearColor(red: 0.055, green: 0.055, blue: 0.06, alpha: 1) : MTLClearColor(red: 0.957, green: 0.957, blue: 0.965, alpha: 1)
             let target = drawable.texture
-            let fit = Self.fitRect(image: state.display.imageSize, in: CGSize(width: target.width, height: target.height), inset: 24 * (view.window?.backingScaleFactor ?? 2))
+            let fit = Self.fitRect(image: state.display.imageSize, in: CGSize(width: target.width, height: target.height), inset: state.canvasInset * scale)
             // 先清屏
             let rp = MTLRenderPassDescriptor()
             rp.colorAttachments[0].texture = target
@@ -88,10 +123,10 @@ struct StageView: View {
                 CanvasView(state: state)
                 if state.source == nil { EmptyGuide(state: state) }
                 if state.source != nil, state.effectiveView != .original, let i = state.selectedMaskIndex, [.radial, .linear].contains(state.params.masks[i].type) {
-                    MaskHandle(state: state, index: i, fit: CanvasView.Coordinator.fitRect(image: state.display.imageSize, in: geo.size, inset: 24))
+                    MaskHandle(state: state, index: i, fit: CanvasView.Coordinator.fitRect(image: state.display.imageSize, in: geo.size, inset: state.canvasInset))
                 }
                 if state.effectiveView == .split, state.source != nil {
-                    let fit = CanvasView.Coordinator.fitRect(image: state.display.imageSize, in: geo.size, inset: 24)
+                    let fit = CanvasView.Coordinator.fitRect(image: state.display.imageSize, in: geo.size, inset: state.canvasInset)
                     let x = fit.minX + fit.width * state.split
                     Rectangle().fill(.white).frame(width: 1, height: fit.height)
                         .shadow(color: .black.opacity(0.4), radius: 0.5)
@@ -101,7 +136,7 @@ struct StageView: View {
                         .position(x: x, y: fit.minY + 14)
                     Color.clear.contentShape(Rectangle()).frame(width: 24, height: fit.height).position(x: x, y: fit.midY)
                         .gesture(DragGesture().onChanged { g in state.split = min(1, max(0, (g.location.x - fit.minX) / fit.width)) })
-                        .onHover { $0 ? NSCursor.resizeLeftRight.push() : NSCursor.pop() }
+                        .hoverCursor(.resizeLeftRight)
                 }
                 if dropTarget {
                     RoundedRectangle(cornerRadius: 2).stroke(style: StrokeStyle(lineWidth: 1, dash: [4])).padding(12)
@@ -169,7 +204,7 @@ struct MaskHandle: View {
             }
             state.params.masks[index] = m
         })
-        .onHover { $0 ? NSCursor.crosshair.push() : NSCursor.pop() }
+        .hoverCursor(.crosshair)
     }
 }
 

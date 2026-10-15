@@ -1,5 +1,8 @@
-import AppKit
 import LinseCore
+import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 import UniformTypeIdentifiers
 
 // 蒙版、LUT、XMP、AI 设置、日夜间模式
@@ -61,14 +64,12 @@ extension AppState {
 
     // MARK: LUT
 
-    func importLUT() {
+    func importLUTs(_ urls: [URL]) {
         guard busy == nil else { return flash("正在处理，请稍候") }
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: "cube") ?? .data]
-        panel.allowsMultipleSelection = true
-        guard panel.runModal() == .OK else { return }
         var last: CubeLut?
-        for url in panel.urls {
+        for url in urls {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
             do { last = try luts.importFile(url) } catch { flash("\(url.lastPathComponent) 无法使用：\(error.localizedDescription)") }
         }
         lutList = luts.list
@@ -88,22 +89,6 @@ extension AppState {
         lutList = luts.list
         if params.lut?.id == id { params.lut = nil }
         if matched?.lut?.id == id { matched = nil }
-    }
-
-    // MARK: XMP
-
-    func exportXMP() {
-        guard source != nil else { return flash("先导入照片") }
-        let base = ((source?.name ?? "临色") as NSString).deletingPathExtension + "_临色"
-        let panel = NSSavePanel()
-        panel.nameFieldStringValue = base + ".xmp"
-        panel.allowedContentTypes = [UTType(filenameExtension: "xmp") ?? .xml]
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        do {
-            try XMP.make(params, name: url.deletingPathExtension().lastPathComponent).write(to: url, atomically: true, encoding: .utf8)
-            flash(params.masks.isEmpty ? "已导出 Lightroom 预设" : "已导出 Lightroom 预设（蒙版不包含在内）")
-            NSWorkspace.shared.activateFileViewerSelecting([url])
-        } catch { flash("导出失败：\(error.localizedDescription)") }
     }
 
     // MARK: AI 设置（设置存在数据目录，Key 存钥匙串）
@@ -135,9 +120,13 @@ extension AppState {
 
     func applyTheme() {
         UserDefaults.standard.set(theme.rawValue, forKey: "theme")
+        #if os(macOS)
         NSApp?.appearance = theme == .auto ? nil : NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        #endif
         redrawTick &+= 1
     }
+
+    var colorScheme: ColorScheme? { theme == .auto ? nil : theme == .dark ? .dark : .light }
 
     func cycleTheme() {
         let all = ThemeMode.allCases
