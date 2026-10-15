@@ -21,6 +21,14 @@ struct Summary {
     var secs: Double
     var match: MatchSummary?
     var stale = false
+    var ai: AIAnalysis?
+    var aiCorrections: [String] = []
+}
+
+enum ThemeMode: String, CaseIterable {
+    case auto, light, dark
+    var label: String { ["auto": "跟随系统", "light": "日间模式", "dark": "夜间模式"][rawValue]! }
+    var icon: String { ["auto": "circle.lefthalf.filled", "light": "sun.max", "dark": "moon"][rawValue]! }
 }
 
 @MainActor
@@ -45,6 +53,14 @@ final class AppState: ObservableObject {
     @Published var toast: String?
     @Published var redrawTick = 0
     @Published var selectedMask: String?
+    @Published var showMaskOverlay = true
+    @Published var lutList: [CubeLut] = []
+    @Published var aiSettings = AISettings()
+    @Published var aiHasKey = false
+    @Published var showAISettings = false
+    @Published var theme: ThemeMode = .auto { didSet { applyTheme() } }
+    var aiTask: Task<Void, Never>?
+    let luts: LutStore
 
     private var suppressEdit = false
     private var histTask: Task<Void, Never>?
@@ -59,7 +75,13 @@ final class AppState: ObservableObject {
         } catch {
             fatalError("Metal 不可用：\(error.localizedDescription)")
         }
+        luts = LutStore(dir: Self.dataDir.appendingPathComponent("luts", isDirectory: true))
+        display.luts = luts
+        proxy.luts = luts
+        lutList = luts.list
         loadPresets()
+        loadAISettings()
+        theme = ThemeMode(rawValue: UserDefaults.standard.string(forKey: "theme") ?? "") ?? .auto
     }
 
     var effectiveView: ViewMode { peekOriginal ? .original : viewMode }
@@ -176,23 +198,45 @@ final class AppState: ObservableObject {
 
     // MARK: 匹配
 
-    func runMatch() {
+    /// useAI：先让视觉模型看图给出初值和判断，再用计算精确对齐
+    func runMatch(useAI: Bool = false) {
         guard busy == nil else { return flash("正在处理，请稍候") }
         guard let source, let target else { return flash(source == nil ? "缺少照片" : "缺少目标风格图") }
-        busy = "分析目标照片…"
-        let proxy = Box(self.proxy)
+        if useAI && !aiHasKey {
+            showAISettings = true
+            return flash("先填写 API Key")
+        }
+        let ai = aiSettings, key = useAI ? (ProcessInfo.processInfo.environment["LINSE_AI_KEY"] ?? AIKeychain.load()) : ""
+        busy = useAI ? "AI（\(ai.model)\(ai.effort == .auto ? "" : " · 思考强度 \(ai.effort.rawValue)")\(ai.fast ? " · 快速" : "")）正在看图…" : "分析目标照片…"
+        let proxy = Box(self.proxy), ctx = Box(display.ciContext)
         let t0 = Date()
-        Task.detached(priority: .userInitiated) { [weak self] in
+        aiTask = Task.detached(priority: .userInitiated) { [weak self] in
             do {
                 let r = proxy.v
-                try r.setImage(ci: target.ci, maxSide: 320)
-                let tw = Int(r.imageSize.width), th = Int(r.imageSize.height)
-                let tpx = try r.renderRGBA8(Params(), width: tw, height: th, opts: RenderOptions(bypass: true))
-                let tStats = Stats.compute(tpx, weights: Stats.detailWeights(tpx, width: tw))
+                func measure(_ ci: CIImage) throws -> ImageStats {
+                    try r.setImage(ci: ci, maxSide: 320)
+                    let w = Int(r.imageSize.width), h = Int(r.imageSize.height)
+                    let px = try r.renderRGBA8(Params(), width: w, height: h, opts: RenderOptions(bypass: true))
+                    return Stats.compute(px, weights: Stats.detailWeights(px, width: w))
+                }
+                var found: AIAnalysis?
+                if useAI {
+                    // 把和估计器同一套的实测统计一起发给模型，让它以测量为准、以看图判断内容
+                    let stats = ["source": AIAnalysis.statsJSON(try measure(source.ci)), "target": AIAnalysis.statsJSON(try measure(target.ci))]
+                    let imgs = AIImages(source: try Self.jpegBase64(source.ci, ctx.v), target: try Self.jpegBase64(target.ci, ctx.v),
+                                        stats: try JSONSerialization.data(withJSONObject: stats, options: [.sortedKeys]))
+                    found = try await AIClient.analyze(ai, key: key, images: imgs)
+                    try Task.checkCancellation()
+                    await MainActor.run { self?.busy = "分析目标照片…" }
+                }
+                let tStats = try measure(target.ci)
                 try r.setImage(ci: source.ci, maxSide: 320)
-                let (p, sm) = try Estimator.match(r, target: tStats, options: MatchOptions(onProgress: { stage in
-                    Task { @MainActor in self?.busy = "正在对齐：\(stage)" }
+                let analysis = found
+                let label = analysis != nil ? "按 AI 初值精确对齐" : "正在对齐"
+                let (p, sm) = try Estimator.match(r, target: tStats, options: MatchOptions(prior: analysis?.prior, portraitHint: analysis?.isPortrait, onProgress: { stage in
+                    Task { @MainActor in self?.busy = "\(label)：\(stage)" }
                 }))
+                try Task.checkCancellation()
                 await MainActor.run {
                     guard let self else { return }
                     var np = p
@@ -200,14 +244,37 @@ final class AppState: ObservableObject {
                     self.setParams(np)
                     self.matched = np
                     self.strength = 100
-                    self.summary = Summary(source: "计算匹配", secs: Date().timeIntervalSince(t0), match: sm)
+                    let secs = Date().timeIntervalSince(t0)
+                    self.summary = Summary(source: analysis != nil ? "AI 辅助匹配" : "计算匹配", secs: secs, match: sm,
+                                           ai: analysis, aiCorrections: analysis?.corrections(final: np) ?? [])
                     self.busy = nil
-                    self.flash(String(format: "匹配完成 · %.1f 秒", Date().timeIntervalSince(t0)))
+                    self.aiTask = nil
+                    self.flash(String(format: "匹配完成 · %.1f 秒", secs))
                 }
             } catch {
-                await MainActor.run { self?.busy = nil; self?.flash("匹配失败：\(error.localizedDescription)") }
+                await MainActor.run {
+                    guard let self else { return }
+                    self.busy = nil
+                    self.aiTask = nil
+                    if error is CancellationError || (error as? URLError)?.code == .cancelled { return self.flash("已取消") }
+                    self.flash("\(useAI ? "AI 分析" : "匹配")失败：\(error.localizedDescription)")
+                }
             }
         }
+    }
+
+    /// 处理中的 AI 请求可以取消；计算阶段很快，不提供取消
+    var canCancel: Bool { aiTask != nil && (busy?.hasPrefix("AI") ?? false) }
+    func cancelBusy() { aiTask?.cancel() }
+
+    nonisolated static func jpegBase64(_ ci: CIImage, _ ctx: CIContext, max side: CGFloat = 1024) throws -> String {
+        let e = ci.extent
+        let s = min(1, side / Swift.max(e.width, e.height))
+        let img = ci.transformed(by: CGAffineTransform(scaleX: s, y: s))
+        guard let d = ctx.jpegRepresentation(of: img, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                             options: [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): 0.9])
+        else { throw AIError("图片编码失败") }
+        return d.base64EncodedString()
     }
 
     // MARK: 直方图 / 预设缩略图（都用小图渲染，同一条管线）
@@ -239,11 +306,13 @@ final class AppState: ObservableObject {
 
     // MARK: 预设
 
-    var presetsURL: URL {
+    static var dataDir: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Linse", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("presets.json")
+        return dir
     }
+
+    var presetsURL: URL { Self.dataDir.appendingPathComponent("presets.json") }
 
     func loadPresets() {
         guard let data = try? Data(contentsOf: presetsURL), let list = try? JSONDecoder().decode([Preset].self, from: data) else { return }
@@ -293,6 +362,7 @@ final class AppState: ObservableObject {
         let params = self.params, ci = source.ci
         let ex = Box(exporter ?? (try? Renderer(device: display.device)))
         exporter = ex.v
+        ex.v?.luts = luts
         Task.detached(priority: .userInitiated) { [weak self] in
             do {
                 guard let r = ex.v else { throw RenderError.noDevice }
@@ -321,6 +391,7 @@ final class AppState: ObservableObject {
         do {
             let r = try exporter ?? Renderer(device: display.device)
             exporter = r
+            r.luts = luts
             let text = try Cube.bake(r, params, title: url.deletingPathExtension().lastPathComponent)
             try text.write(to: url, atomically: true, encoding: .utf8)
             flash("已导出 LUT")
@@ -334,10 +405,19 @@ final class AppState: ObservableObject {
         let env = ProcessInfo.processInfo.environment
         if let s = env["LINSE_SOURCE"] { load(URL(fileURLWithPath: s), into: .source) }
         if let t = env["LINSE_TARGET"] { load(URL(fileURLWithPath: t), into: .target) }
-        if env["LINSE_APPEARANCE"] == "light" { NSApp.appearance = NSAppearance(named: .aqua) }
-        if env["LINSE_APPEARANCE"] == "dark" { NSApp.appearance = NSAppearance(named: .darkAqua) }
+        if let t = env["LINSE_APPEARANCE"], let m = ThemeMode(rawValue: t) { theme = m }
         if let v = env["LINSE_VIEW"], let m = ViewMode(rawValue: v) { viewMode = m }
+        if let k = env["LINSE_AI_KEY"], !k.isEmpty { aiHasKey = true }
+        if let b = env["LINSE_AI_BASE"] { aiSettings.baseUrl = b }
+        if let m = env["LINSE_AI_MODEL"] { aiSettings.model = m }
+        if let l = env["LINSE_LUT"], let lut = try? luts.importFile(URL(fileURLWithPath: l)) {
+            lutList = luts.list
+            params.lut = LutRef(id: lut.id, name: lut.name, intensity: 100)
+        }
+        if let t = env["LINSE_MASK"], let mt = MaskType(rawValue: t) { addMask(mt) }
+        if env["LINSE_AI_SETTINGS"] == "1" { showAISettings = true }
         if env["LINSE_MATCH"] == "1" { runMatch() }
+        if env["LINSE_MATCH"] == "ai" { runMatch(useAI: true) }
         if let out = env["LINSE_SNAPSHOT"] {
             // 等匹配结束后截自己的窗口（自己的窗口不需要屏幕录制权限），然后退出
             Task {
@@ -348,6 +428,10 @@ final class AppState: ObservableObject {
                       let cg = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(w.windowNumber), [.boundsIgnoreFraming, .bestResolution]) else { return }
                 let rep = NSBitmapImageRep(cgImage: cg)
                 try? rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: out))
+                if let sh = w.attachedSheet,
+                   let sc = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(sh.windowNumber), [.boundsIgnoreFraming, .bestResolution]) {
+                    try? NSBitmapImageRep(cgImage: sc).representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: out.replacingOccurrences(of: ".png", with: "-sheet.png")))
+                }
                 if env["LINSE_QUIT"] == "1" { NSApp.terminate(nil) }
             }
         }

@@ -126,6 +126,7 @@ struct ChangesList: View {
                     else if s.secs > 0 { Text(String(format: "%.1f 秒", s.secs)).font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary) }
                 }
                 .padding(.bottom, 10)
+                if let ai = s.ai { AINotes(ai: ai, corrections: s.aiCorrections).padding(.bottom, 12) }
             }
             if rows.isEmpty {
                 Text("还没有改动").font(.system(size: 12)).foregroundStyle(.tertiary).frame(maxWidth: .infinity, alignment: .center).padding(.top, 24)
@@ -172,8 +173,51 @@ struct ChangesList: View {
         }
         if abs(p.grading.balance) >= 0.5 { gr.append(("平衡", f(p.grading.balance))) }
         group("颜色分级", gr)
+        if let l = p.lut { group("滤镜", [(l.name, "\(Int(l.intensity))%")]) }
         let e = p.effects
         group("效果", [("清晰度", e.clarity), ("去雾", e.dehaze), ("锐化", e.sharpen), ("暗角", e.vignette), ("颗粒", e.grain)].filter { abs($0.1) >= 0.5 }.map { ($0.0, f($0.1)) })
+        group("蒙版", p.masks.map { ($0.name, $0.enabled ? "启用" : "停用") })
         return out
+    }
+}
+
+/// AI 看图的判断：场景、风格、排除的内容、每个滑块的理由、实测对 AI 初值的修正
+struct AINotes: View {
+    let ai: AIAnalysis
+    let corrections: [String]
+    @State private var open = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if !ai.styleSummary.isEmpty { Text(ai.styleSummary).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true) }
+            if !ai.contentNotStyle.isEmpty {
+                Text("不当作风格：" + ai.contentNotStyle.joined(separator: "、")).font(.system(size: 11)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if !ai.reasons.isEmpty || !corrections.isEmpty {
+                Button { withAnimation(.easeOut(duration: 0.15)) { open.toggle() } } label: {
+                    HStack(spacing: 4) {
+                        Text(open ? "收起 AI 判断" : "展开 AI 判断").font(.system(size: 11))
+                        Image(systemName: "chevron.down").font(.system(size: 8)).rotationEffect(.degrees(open ? 180 : 0))
+                    }
+                    .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            if open {
+                ForEach(Array(ai.reasons.enumerated()), id: \.offset) { _, r in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(r.slider).font(.system(size: 11)).foregroundStyle(.secondary)
+                        Text(r.why).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                if !corrections.isEmpty {
+                    GroupTitle("AI 初值 → 实测后")
+                    ForEach(corrections, id: \.self) { Text($0).font(.system(size: 11).monospacedDigit()) }
+                }
+            }
+        }
+        .padding(10)
+        .overlay(Rectangle().stroke(Color.primary.opacity(0.12), lineWidth: 1))
     }
 }

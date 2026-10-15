@@ -21,7 +21,9 @@ struct PanelView: View {
                 Section("色调曲线", changed: Curves.channels.contains { !Curve.isIdentity(state.params.curves[keyPath: $0]) }) { curves }
                 Section("混色器", changed: !HSLTable.isIdentity(state.params)) { hsl }
                 Section("颜色分级", changed: gradingChanged) { grading }
+                Section("滤镜 LUT", changed: state.params.lut != nil) { lut }
                 Section("效果", changed: effectsChanged) { effects }
+                Section("蒙版", changed: !state.params.masks.isEmpty) { MaskPanel(state: state) }
             }
         }
         .scrollIndicators(.automatic)
@@ -109,6 +111,24 @@ struct PanelView: View {
         SliderRow(label: "平衡", value: Binding(get: { state.params.grading.balance }, set: { state.params.grading.balance = $0 }), range: -100...100)
     }
 
+    @ViewBuilder var lut: some View {
+        HStack(spacing: 8) {
+            Picker("", selection: Binding(get: { state.params.lut?.id ?? "" }, set: { state.selectLUT($0.isEmpty ? nil : $0) })) {
+                Text("无").tag("")
+                ForEach(state.lutList, id: \.id) { Text($0.name).tag($0.id) }
+            }
+            .labelsHidden().controlSize(.small)
+            Button("导入…") { state.importLUT() }.controlSize(.small).help("导入 .cube 格式的 3D LUT")
+            if let id = state.params.lut?.id {
+                Button("删除") { state.deleteLUT(id) }.controlSize(.small).help("从本机删除这个 LUT")
+            }
+        }
+        .padding(.top, 4)
+        if state.params.lut != nil {
+            SliderRow(label: "强度", value: Binding(get: { state.params.lut?.intensity ?? 0 }, set: { state.params.lut?.intensity = $0 }), range: 0...100, def: 100)
+        }
+    }
+
     @ViewBuilder var effects: some View {
         GroupTitle("质感")
         SliderRow(label: "清晰度", value: b(\.effects.clarity), range: -100...100)
@@ -122,13 +142,91 @@ struct PanelView: View {
     }
 }
 
+// MARK: - 蒙版
+
+struct MaskPanel: View {
+    @ObservedObject var state: AppState
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach([(MaskType.radial, "径向渐变"), (.linear, "线性渐变"), (.luminance, "亮度范围")], id: \.0) { t, name in
+                Button { state.addMask(t) } label: { Label(name, systemImage: "plus").font(.system(size: 11)) }
+                    .controlSize(.small).disabled(state.params.masks.count >= Params.maxMasks)
+            }
+        }
+        .padding(.top, 4)
+        ForEach(state.params.masks) { m in
+            let on = m.id == state.selectedMask
+            HStack(spacing: 8) {
+                Toggle("", isOn: Binding(get: { m.enabled }, set: { v in update(m.id) { $0.enabled = v } })).labelsHidden().controlSize(.mini).help("启用")
+                Text(m.name).font(.system(size: 12)).foregroundStyle(on ? .primary : .secondary)
+                Spacer()
+                Button { state.deleteMask(m.id) } label: { Image(systemName: "xmark").font(.system(size: 9)) }.buttonStyle(.plain).foregroundStyle(.secondary).help("删除")
+            }
+            .padding(.horizontal, 8).frame(height: 26)
+            .overlay(Rectangle().stroke(Color.primary.opacity(on ? 0.5 : 0.12), lineWidth: 1))
+            .contentShape(Rectangle())
+            .onTapGesture { state.selectedMask = on ? nil : m.id }
+            .help(m.type == .luminance ? "点击选中" : "点击选中后，可以在图上拖动摆放")
+        }
+        if let i = state.selectedMaskIndex {
+            let m = state.params.masks[i]
+            HStack(spacing: 16) {
+                Toggle("显示蒙版叠加", isOn: $state.showMaskOverlay)
+                Toggle("反相", isOn: Binding(get: { m.invert }, set: { v in update(m.id) { $0.invert = v } }))
+            }
+            .font(.system(size: 11)).controlSize(.small).padding(.top, 6)
+            GroupTitle("范围")
+            switch m.type {
+            case .radial:
+                row("中心 X", m.id, \.cx, 0...100, 50, scale: 100)
+                row("中心 Y", m.id, \.cy, 0...100, 50, scale: 100)
+                row("宽度", m.id, \.rx, 1...100, 30, scale: 100)
+                row("高度", m.id, \.ry, 1...100, 30, scale: 100)
+                row("羽化", m.id, \.feather, 0...100, 50)
+            case .linear:
+                row("起点 X", m.id, \.cx, 0...100, 50, scale: 100)
+                row("起点 Y", m.id, \.cy, 0...100, 0, scale: 100)
+                row("终点 X", m.id, \.x2, 0...100, 50, scale: 100)
+                row("终点 Y", m.id, \.y2, 0...100, 50, scale: 100)
+            case .luminance:
+                row("亮度下限", m.id, \.lumMin, 0...100, 60)
+                row("亮度上限", m.id, \.lumMax, 0...100, 100)
+                row("平滑", m.id, \.feather, 0...100, 50)
+            }
+            GroupTitle("局部调整")
+            row("曝光", m.id, \.adjust.exposure, -4...4, 0, step: 0.01, digits: 2)
+            row("对比度", m.id, \.adjust.contrast, -100...100, 0)
+            row("色温", m.id, \.adjust.temperature, -100...100, 0)
+            row("色调", m.id, \.adjust.tint, -100...100, 0)
+            row("饱和度", m.id, \.adjust.saturation, -100...100, 0)
+        }
+    }
+
+    func update(_ id: String, _ f: (inout Mask) -> Void) {
+        guard let i = state.params.masks.firstIndex(where: { $0.id == id }) else { return }
+        f(&state.params.masks[i])
+    }
+
+    func row(_ label: String, _ id: String, _ kp: WritableKeyPath<Mask, Double>, _ range: ClosedRange<Double>, _ def: Double,
+             scale: Double = 1, step: Double = 1, digits: Int = 0) -> some View {
+        SliderRow(label: label, value: Binding(
+            get: { (state.params.masks.first { $0.id == id }?[keyPath: kp] ?? 0) * scale },
+            set: { v in update(id) { $0[keyPath: kp] = v / scale } }), range: range, step: step, digits: digits, def: def)
+    }
+}
+
 // MARK: - 小组件
 
 struct Section<Content: View>: View {
     let title: String, changed: Bool
     @ViewBuilder let content: Content
     @State private var open = true
-    init(_ title: String, changed: Bool, @ViewBuilder content: () -> Content) { self.title = title; self.changed = changed; self.content = content() }
+    init(_ title: String, changed: Bool, @ViewBuilder content: () -> Content) {
+        self.title = title; self.changed = changed; self.content = content()
+        // 开发自测：LINSE_PANEL_FOCUS 只展开列出的分区
+        if let f = ProcessInfo.processInfo.environment["LINSE_PANEL_FOCUS"] { _open = State(initialValue: f.split(separator: ",").contains { $0 == title }) }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {

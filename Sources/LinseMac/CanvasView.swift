@@ -49,7 +49,7 @@ struct CanvasView: NSViewRepresentable {
             cb.makeRenderCommandEncoder(descriptor: rp)?.endEncoding()
             if state.display.image != nil, fit.width > 0 {
                 let vp = MTLViewport(originX: fit.minX, originY: fit.minY, width: fit.width, height: fit.height, znear: 0, zfar: 1)
-                let showMask = state.selectedMask.flatMap { id in state.params.masks.firstIndex { $0.id == id } } ?? -1
+                let showMask = state.showMaskOverlay ? (state.selectedMaskIndex ?? -1) : -1
                 switch state.effectiveView {
                 case .result:
                     try? state.display.encode(state.params, into: target, commandBuffer: cb, opts: RenderOptions(showMask: showMask), viewport: vp)
@@ -87,6 +87,9 @@ struct StageView: View {
             ZStack {
                 CanvasView(state: state)
                 if state.source == nil { EmptyGuide(state: state) }
+                if state.source != nil, state.effectiveView != .original, let i = state.selectedMaskIndex, state.params.masks[i].type != .luminance {
+                    MaskHandle(state: state, index: i, fit: CanvasView.Coordinator.fitRect(image: state.display.imageSize, in: geo.size, inset: 24))
+                }
                 if state.effectiveView == .split, state.source != nil {
                     let fit = CanvasView.Coordinator.fitRect(image: state.display.imageSize, in: geo.size, inset: 24)
                     let x = fit.minX + fit.width * state.split
@@ -106,7 +109,11 @@ struct StageView: View {
                 }
                 if let b = state.busy {
                     Color.black.opacity(0.35)
-                    VStack(spacing: 12) { ProgressView().controlSize(.small); Text(b).font(.system(size: 12)) }
+                    VStack(spacing: 12) {
+                        ProgressView().controlSize(.small)
+                        Text(b).font(.system(size: 12)).multilineTextAlignment(.center)
+                        if state.canCancel { Button("取消") { state.cancelBusy() }.controlSize(.small).keyboardShortcut(.cancelAction) }
+                    }
                         .padding(18).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
                 }
             }
@@ -121,6 +128,48 @@ struct StageView: View {
             }
             return true
         }
+    }
+}
+
+/// 选中的径向/线性蒙版：在图上画出位置，拖动重新摆放（径向：按下处为中心、拖出半径；线性：从按下处拖到松开处）
+struct MaskHandle: View {
+    @ObservedObject var state: AppState
+    let index: Int
+    let fit: CGRect
+
+    var body: some View {
+        let m = state.params.masks[index]
+        ZStack {
+            Color.clear.contentShape(Rectangle())
+            if m.type == .radial {
+                Ellipse().stroke(.white.opacity(0.9), lineWidth: 1).shadow(color: .black.opacity(0.5), radius: 0.5)
+                    .frame(width: m.rx * 2 * fit.width, height: m.ry * 2 * fit.height)
+                    .position(x: m.cx * fit.width, y: m.cy * fit.height)
+            } else {
+                Path { p in
+                    p.move(to: CGPoint(x: m.cx * fit.width, y: m.cy * fit.height))
+                    p.addLine(to: CGPoint(x: m.x2 * fit.width, y: m.y2 * fit.height))
+                }
+                .stroke(.white.opacity(0.9), style: StrokeStyle(lineWidth: 1, dash: [4, 3])).shadow(color: .black.opacity(0.5), radius: 0.5)
+            }
+            Circle().fill(.white).frame(width: 6, height: 6).shadow(color: .black.opacity(0.5), radius: 1)
+                .position(x: m.cx * fit.width, y: m.cy * fit.height)
+        }
+        .frame(width: fit.width, height: fit.height)
+        .position(x: fit.midX, y: fit.midY)
+        .gesture(DragGesture(minimumDistance: 0).onChanged { g in
+            let x0 = min(1, max(0, g.startLocation.x / fit.width)), y0 = min(1, max(0, g.startLocation.y / fit.height))
+            let x = min(1, max(0, g.location.x / fit.width)), y = min(1, max(0, g.location.y / fit.height))
+            var m = state.params.masks[index]
+            m.cx = x0; m.cy = y0
+            if m.type == .radial {
+                if hypot(x - x0, y - y0) > 0.01 { m.rx = max(0.01, abs(x - x0)); m.ry = max(0.01, abs(y - y0)) }
+            } else {
+                m.x2 = x; m.y2 = hypot(x - x0, y - y0) > 0.01 ? y : min(1, y0 + 0.01)
+            }
+            state.params.masks[index] = m
+        })
+        .onHover { $0 ? NSCursor.crosshair.push() : NSCursor.pop() }
     }
 }
 
