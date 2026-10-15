@@ -87,7 +87,7 @@ struct StageView: View {
             ZStack {
                 CanvasView(state: state)
                 if state.source == nil { EmptyGuide(state: state) }
-                if state.source != nil, state.effectiveView != .original, let i = state.selectedMaskIndex, state.params.masks[i].type != .luminance {
+                if state.source != nil, state.effectiveView != .original, let i = state.selectedMaskIndex, [.radial, .linear].contains(state.params.masks[i].type) {
                     MaskHandle(state: state, index: i, fit: CanvasView.Coordinator.fitRect(image: state.display.imageSize, in: geo.size, inset: 24))
                 }
                 if state.effectiveView == .split, state.source != nil {

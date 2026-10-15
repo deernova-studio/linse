@@ -148,10 +148,17 @@ struct MaskPanel: View {
     @ObservedObject var state: AppState
 
     var body: some View {
-        HStack(spacing: 6) {
-            ForEach([(MaskType.radial, "径向渐变"), (.linear, "线性渐变"), (.luminance, "亮度范围")], id: \.0) { t, name in
-                Button { state.addMask(t) } label: { Label(name, systemImage: "plus").font(.system(size: 11)) }
-                    .controlSize(.small).disabled(state.params.masks.count >= Params.maxMasks)
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach([[MaskType.person, .subject, .sky], [.radial, .linear, .luminance]], id: \.self) { row in
+                HStack(spacing: 6) {
+                    ForEach(row, id: \.self) { t in
+                        Button { state.addMask(t) } label: {
+                            Label(t.label, systemImage: t.isSmart ? "wand.and.stars" : "plus").font(.system(size: 11)).frame(maxWidth: .infinity)
+                        }
+                        .controlSize(.small).disabled(state.params.masks.count >= Params.maxMasks || state.busy != nil)
+                        .help(t.isSmart ? "自动识别\(t.label)" : "")
+                    }
+                }
             }
         }
         .padding(.top, 4)
@@ -167,7 +174,7 @@ struct MaskPanel: View {
             .overlay(Rectangle().stroke(Color.primary.opacity(on ? 0.5 : 0.12), lineWidth: 1))
             .contentShape(Rectangle())
             .onTapGesture { state.selectedMask = on ? nil : m.id }
-            .help(m.type == .luminance ? "点击选中" : "点击选中后，可以在图上拖动摆放")
+            .help(m.type == .radial || m.type == .linear ? "点击选中后，可以在图上拖动摆放" : "点击选中")
         }
         if let i = state.selectedMaskIndex {
             let m = state.params.masks[i]
@@ -193,6 +200,8 @@ struct MaskPanel: View {
                 row("亮度下限", m.id, \.lumMin, 0...100, 60)
                 row("亮度上限", m.id, \.lumMax, 0...100, 100)
                 row("平滑", m.id, \.feather, 0...100, 50)
+            case .person, .subject, .sky:
+                row("羽化", m.id, \.feather, 0...100, 20)
             }
             GroupTitle("局部调整")
             row("曝光", m.id, \.adjust.exposure, -4...4, 0, step: 0.01, digits: 2)

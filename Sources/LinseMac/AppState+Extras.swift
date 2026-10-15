@@ -8,11 +8,48 @@ extension AppState {
 
     func addMask(_ type: MaskType) {
         guard params.masks.count < Params.maxMasks else { return flash("最多 \(Params.maxMasks) 个蒙版") }
+        if type.isSmart && smartMasks.maskBitmap(type) == nil {
+            // 先识别，识别到了再加蒙版
+            return detect(type) { [weak self] in self?.addMask(type) }
+        }
         let n = params.masks.filter { $0.type == type }.count + 1
         let m = Mask(type: type, index: n)
         params.masks.append(m)
         selectedMask = m.id
         showMaskOverlay = true
+    }
+
+    /// 在后台识别人物/主体/天空；完成后在主线程回调
+    func detect(_ type: MaskType, then done: (() -> Void)? = nil) {
+        guard busy == nil else { return flash("正在处理，请稍候") }
+        guard let ci = source?.ci else { return flash("先导入照片") }
+        busy = "正在识别\(type.label)…"
+        let ctx = Box(display.ciContext), store = smartMasks
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let result = Result { try SmartMask.compute(type, image: ci, context: ctx.v) }
+            await MainActor.run {
+                guard let self else { return }
+                self.busy = nil
+                self.scheduleHistogram()
+                switch result {
+                case .success(let b):
+                    // 识别期间换了图，结果作废
+                    guard self.source?.ci === ci else { return }
+                    store.set(type, b)
+                    self.redrawTick &+= 1
+                    done?()
+                case .failure(let e):
+                    self.flash(e.localizedDescription)
+                }
+            }
+        }
+    }
+
+    /// 换图后，已有的识别类蒙版按新图重新识别
+    func refreshSmartMasks() {
+        let kinds = Set(params.masks.map(\.type).filter { $0.isSmart && smartMasks.maskBitmap($0) == nil })
+        guard let k = kinds.first else { return }
+        detect(k) { [weak self] in self?.refreshSmartMasks() }
     }
 
     func deleteMask(_ id: String) {

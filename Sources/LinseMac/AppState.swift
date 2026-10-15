@@ -61,6 +61,7 @@ final class AppState: ObservableObject {
     @Published var theme: ThemeMode = .auto { didSet { applyTheme() } }
     var aiTask: Task<Void, Never>?
     let luts: LutStore
+    let smartMasks = SmartMaskStore()
 
     private var suppressEdit = false
     private var histTask: Task<Void, Never>?
@@ -78,6 +79,8 @@ final class AppState: ObservableObject {
         luts = LutStore(dir: Self.dataDir.appendingPathComponent("luts", isDirectory: true))
         display.luts = luts
         proxy.luts = luts
+        display.maskBitmaps = smartMasks
+        proxy.maskBitmaps = smartMasks
         lutList = luts.list
         loadPresets()
         loadAISettings()
@@ -188,6 +191,8 @@ final class AppState: ObservableObject {
             } catch { return flash(error.localizedDescription) }
             source = slot
             thumbnails = [:]
+            smartMasks.reset()
+            refreshSmartMasks()
             redrawTick &+= 1
             scheduleHistogram()
         case .target:
@@ -279,7 +284,7 @@ final class AppState: ObservableObject {
 
     // MARK: 直方图 / 预设缩略图（都用小图渲染，同一条管线）
 
-    private func scheduleHistogram() {
+    func scheduleHistogram() {
         histTask?.cancel()
         guard source != nil else { histogram = []; return }
         histTask = Task { [weak self] in
@@ -363,6 +368,7 @@ final class AppState: ObservableObject {
         let ex = Box(exporter ?? (try? Renderer(device: display.device)))
         exporter = ex.v
         ex.v?.luts = luts
+        ex.v?.maskBitmaps = smartMasks
         Task.detached(priority: .userInitiated) { [weak self] in
             do {
                 guard let r = ex.v else { throw RenderError.noDevice }

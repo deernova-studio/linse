@@ -22,7 +22,7 @@ struct Uniforms {
 
 struct MaskU {
   float4 A;   // cx, cy, rx, ry
-  float4 B;   // x2, y2, feather(0..1), type(0 radial,1 linear,2 luminance)
+  float4 B;   // x2, y2, feather(0..1), type(0 radial,1 linear,2 luminance,3 识别出的位图：人物/主体/天空)
   float4 C;   // lumMin, lumMax, invert, enabled
   float4 D;   // exposure, contrast, -, -
   float4 E;   // saturation, -, -, -
@@ -143,7 +143,7 @@ static float3 applyGrading(float3 c, constant Uniforms& u) {
   return c;
 }
 
-static float maskWeight(constant MaskU& mk, float2 p, float y, float aspect) {
+static float maskWeight(constant MaskU& mk, float2 p, float y, float aspect, float bitmap) {
   float m = 0.0, f = mk.B.z;
   if (mk.B.w < 0.5) {
     float2 d = (p - mk.A.xy) / max(mk.A.zw, float2(1e-4));
@@ -153,9 +153,11 @@ static float maskWeight(constant MaskU& mk, float2 p, float y, float aspect) {
     float2 a = mk.A.xy * sc, b = mk.B.xy * sc, q = p * sc, ab = b - a;
     float t = dot(q - a, ab) / max(dot(ab, ab), 1e-6);
     m = 1.0 - smoothstep(0.0, 1.0, t);
-  } else {
+  } else if (mk.B.w < 2.5) {
     float fw = f * 0.2 + 1e-3;
     m = smoothstep(mk.C.x - fw, mk.C.x, y) * (1.0 - smoothstep(mk.C.y, mk.C.y + fw, y));
+  } else {
+    m = bitmap;
   }
   if (mk.C.z > 0.5) m = 1.0 - m;
   return m * mk.C.w;
@@ -180,7 +182,11 @@ fragment float4 fmain(VOut in [[stage_in]],
                       texture2d<float> img [[texture(0)]],
                       texture2d<float> curveLut [[texture(1)]],
                       texture2d<float> hslTex [[texture(2)]],
-                      texture3d<float> lut3d [[texture(3)]]) {
+                      texture3d<float> lut3d [[texture(3)]],
+                      texture2d<float> mk0 [[texture(4)]],
+                      texture2d<float> mk1 [[texture(5)]],
+                      texture2d<float> mk2 [[texture(6)]],
+                      texture2d<float> mk3 [[texture(7)]]) {
   constexpr sampler s(filter::linear, mip_filter::linear, address::clamp_to_edge);
   constexpr sampler ls(filter::linear, address::clamp_to_edge);
   constexpr sampler rs(filter::linear, s_address::repeat, t_address::clamp_to_edge);
@@ -259,7 +265,14 @@ fragment float4 fmain(VOut in [[stage_in]],
   int maskCount = int(u.p5.w), showMask = int(u.p5.y);
   for (int i = 0; i < MAX_MASKS; i++) {
     if (i >= maskCount) break;
-    float m = maskWeight(masks[i], p, yl, aspect);
+    // 识别出的蒙版是一张灰度位图；羽化用更模糊的 mip 层，边缘更柔
+    float bm = 0.0;
+    if (masks[i].B.w > 2.5) {
+      float lv = masks[i].B.z * 5.0;
+      bm = i == 0 ? mk0.sample(s, p, level(lv)).r : i == 1 ? mk1.sample(s, p, level(lv)).r
+         : i == 2 ? mk2.sample(s, p, level(lv)).r : mk3.sample(s, p, level(lv)).r;
+    }
+    float m = maskWeight(masks[i], p, yl, aspect, bm);
     c = applyMask(masks[i], c, m);
     if (i == showMask) overlay = m;
   }

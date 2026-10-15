@@ -53,6 +53,16 @@ public final class Renderer {
     public private(set) var image: MTLTexture?
     public var imageSize: CGSize { image.map { CGSize(width: $0.width, height: $0.height) } ?? .zero }
     public weak var luts: LutProvider?
+    public weak var maskBitmaps: MaskBitmapProvider?
+    var maskTexCache: [String: MTLTexture] = [:]
+    lazy var blackTex: MTLTexture = {
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: 1, height: 1, mipmapped: false)
+        d.usage = .shaderRead
+        let t = device.makeTexture(descriptor: d)!
+        var z: UInt8 = 0
+        t.replace(region: MTLRegionMake2D(0, 0, 1, 1), mipmapLevel: 0, withBytes: &z, bytesPerRow: 1)
+        return t
+    }()
 
     public init(device: MTLDevice? = MTLCreateSystemDefaultDevice()) throws {
         guard let device else { throw RenderError.noDevice }
@@ -176,7 +186,7 @@ public final class Renderer {
         var mu = masks.map { m -> MaskU in
             var x = MaskU()
             x.A = SIMD4(Float(m.cx), Float(m.cy), Float(m.rx), Float(m.ry))
-            let type: Float = m.type == .radial ? 0 : m.type == .linear ? 1 : 2
+            let type: Float = m.type == .radial ? 0 : m.type == .linear ? 1 : m.type == .luminance ? 2 : 3
             x.B = SIMD4(Float(m.x2), Float(m.y2), Float(m.feather / 100), type)
             x.C = SIMD4(Float(m.lumMin / 100), Float(m.lumMax / 100), m.invert ? 1 : 0, m.enabled ? 1 : 0)
             x.D = SIMD4(Float(m.adjust.exposure), Float(m.adjust.contrast), 0, 0)
@@ -187,6 +197,21 @@ public final class Renderer {
         }
         if mu.isEmpty { mu = [MaskU()] } // 缓冲不能为空
         return (u, mu)
+    }
+
+    /// 识别出的蒙版位图 → 带 mip 的单通道纹理（羽化时取模糊的层），按位图 id 缓存
+    func maskTexture(_ kind: MaskType) -> MTLTexture? {
+        guard let b = maskBitmaps?.maskBitmap(kind) else { return nil }
+        if let t = maskTexCache[b.id] { return t }
+        if maskTexCache.count >= 8 { maskTexCache.removeAll() }
+        let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .r8Unorm, width: b.width, height: b.height, mipmapped: true)
+        d.usage = .shaderRead
+        guard let t = device.makeTexture(descriptor: d), let cb = queue.makeCommandBuffer(), let bl = cb.makeBlitCommandEncoder() else { return nil }
+        b.data.withUnsafeBytes { t.replace(region: MTLRegionMake2D(0, 0, b.width, b.height), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: b.width) }
+        bl.generateMipmaps(for: t); bl.endEncoding()
+        cb.commit(); cb.waitUntilCompleted()
+        maskTexCache[b.id] = t
+        return t
     }
 
     func upload(_ data: [Float], to t: MTLTexture, width: Int) {
@@ -225,6 +250,10 @@ public final class Renderer {
         enc.setFragmentTexture(curveTex, index: 1)
         enc.setFragmentTexture(hslTex, index: 2)
         enc.setFragmentTexture(lutTex, index: 3)
+        for i in 0..<Params.maxMasks {
+            let m = i < p.masks.count ? p.masks[i] : nil
+            enc.setFragmentTexture(m.flatMap { $0.type.isSmart ? maskTexture($0.type) : nil } ?? blackTex, index: 4 + i)
+        }
         enc.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
         enc.endEncoding()
     }

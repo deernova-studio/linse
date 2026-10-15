@@ -37,7 +37,14 @@ public struct LutRef: Codable, Equatable, Sendable {
     public init(id: String, name: String, intensity: Double = 100) { self.id = id; self.name = name; self.intensity = intensity }
 }
 
-public enum MaskType: String, Codable, Sendable { case radial, linear, luminance }
+public enum MaskType: String, Codable, Sendable, CaseIterable {
+    case radial, linear, luminance
+    case person, subject, sky // 识别出的位图蒙版
+    public var isSmart: Bool { self == .person || self == .subject || self == .sky }
+    public var label: String {
+        ["radial": "径向渐变", "linear": "线性渐变", "luminance": "亮度范围", "person": "人物", "subject": "主体", "sky": "天空"][rawValue]!
+    }
+}
 
 public struct MaskAdjust: Codable, Equatable, Sendable {
     public var exposure = 0.0, contrast = 0.0, temperature = 0.0, tint = 0.0, saturation = 0.0
@@ -57,8 +64,9 @@ public struct Mask: Codable, Equatable, Identifiable, Sendable {
 
     public init(type: MaskType, index: Int) {
         self.type = type
-        self.name = "\(["radial": "径向渐变", "linear": "线性渐变", "luminance": "亮度范围"][type.rawValue]!) \(index)"
+        self.name = "\(type.label) \(index)"
         if type == .linear { cy = 0 }
+        if type.isSmart { feather = 20 }
     }
 }
 
