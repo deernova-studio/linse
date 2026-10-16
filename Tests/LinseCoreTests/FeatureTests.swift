@@ -55,7 +55,7 @@ final class FeatureTests: XCTestCase {
         XCTAssertEqual(l.name, "in")
         let again = LutStore(dir: dir.appendingPathComponent("luts"))
         XCTAssertEqual(again.list.map(\.name), ["in"])
-        again.delete(l.id)
+        try again.delete(l.id)
         XCTAssertTrue(LutStore(dir: dir.appendingPathComponent("luts")).list.isEmpty)
     }
 

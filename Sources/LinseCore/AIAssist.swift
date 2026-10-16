@@ -1,12 +1,19 @@
 // 把模型返回的 JSON 变成参数先验，并整理出"AI 判断"说明。模型输出不可信，逐项校验和限幅。和 Electron 版 aiAssist.ts 相同。
 import Foundation
 
-public struct AIAnalysis: Sendable {
+public struct AIAnalysis: Sendable, Equatable {
     public var sourceScene = "", targetScene = "", styleSummary = ""
     public var contentNotStyle: [String] = []
     public var isPortrait: Bool?
     public var reasons: [(slider: String, why: String)] = []
     public var prior = Params()
+
+    public static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.sourceScene == rhs.sourceScene && lhs.targetScene == rhs.targetScene
+            && lhs.styleSummary == rhs.styleSummary && lhs.contentNotStyle == rhs.contentNotStyle
+            && lhs.isPortrait == rhs.isPortrait && lhs.prior == rhs.prior
+            && lhs.reasons.elementsEqual(rhs.reasons) { $0.slider == $1.slider && $0.why == $1.why }
+    }
 
     /// 从模型输出的 JSON 对象解析；字段缺失或类型不对都按默认值处理
     public init(json: [String: Any]) {

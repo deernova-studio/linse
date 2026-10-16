@@ -8,11 +8,14 @@ import simd
 
 public enum RenderError: Error, LocalizedError {
     case noDevice, shader(String), texture(String)
+    case imageTooLarge(width: Int, height: Int, limit: Int)
     public var errorDescription: String? {
         switch self {
         case .noDevice: return "这台设备不支持 Metal"
         case .shader(let s): return "着色器编译失败：\(s)"
         case .texture(let s): return "纹理创建失败：\(s)"
+        case .imageTooLarge(let width, let height, let limit):
+            return "图片尺寸 \(width)×\(height) 超过设备上限 \(limit) 像素，无法原尺寸导出；请先缩小图片"
         }
     }
 }
@@ -117,11 +120,14 @@ public final class Renderer {
     public lazy var ciContext = CIContext(mtlDevice: device, options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!, .cacheIntermediates: false])
 
     /// 用 Core Image 载入（HEIC、RAW 都走这里），存成 16 位浮点纹理：保留相机 RAW 超过 8 位的精度。
-    /// maxSide 限制长边（显卡纹理上限、或估计器用的小图）。
+    /// maxSide 为 nil 时保持原尺寸，超出设备上限则报错；预览/估计器必须显式指定缩放上限。
     public func setImage(ci: CIImage, maxSide: Int? = nil) throws {
         var img = ci
         let ext = img.extent.integral
         var w = Int(ext.width), h = Int(ext.height)
+        if maxSide == nil && max(w, h) > maxTextureSize {
+            throw RenderError.imageTooLarge(width: w, height: h, limit: maxTextureSize)
+        }
         let limit = min(maxSide ?? maxTextureSize, maxTextureSize)
         if max(w, h) > limit {
             let s = Double(limit) / Double(max(w, h))

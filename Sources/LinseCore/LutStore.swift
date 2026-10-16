@@ -44,12 +44,14 @@ public final class LutStore: LutProvider, @unchecked Sendable {
         return l
     }
 
-    public func delete(_ id: String) {
+    public func delete(_ id: String) throws {
+        // 先持久化删除，再发布内存变化；文件删除失败时仍保留可用的 LUT。
+        do { try FileManager.default.removeItem(at: dir.appendingPathComponent("\(id).cube")) }
+        catch CocoaError.fileNoSuchFile {} // 文件已由外部移除，也应允许清理缓存。
         lock.lock()
         items[id] = nil
         order.removeAll { $0 == id }
         lock.unlock()
-        try? FileManager.default.removeItem(at: dir.appendingPathComponent("\(id).cube"))
         try? FileManager.default.removeItem(at: dir.appendingPathComponent("\(id).name"))
     }
 }

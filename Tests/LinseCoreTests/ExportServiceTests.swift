@@ -85,7 +85,7 @@ final class ExportServiceTests: XCTestCase {
             }
         }
         await fulfillment(of: [betweenTiles], timeout: 5)
-        luts.delete(lut.id)
+        try luts.delete(lut.id)
         masks.reset()
         release.signal()
         let result = try await export.value

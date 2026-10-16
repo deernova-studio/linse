@@ -85,10 +85,15 @@ extension AppState {
     }
 
     func deleteLUT(_ id: String) {
-        luts.delete(id)
+        guard !presetLoadFailed else { return flash("预设读取失败，暂时无法确认 LUT 依赖，请修复后再删除") }
+        let dependents = userPresets.filter { $0.params.lut?.id == id }
+        guard dependents.isEmpty else {
+            return flash("LUT 正被预设「\(dependents.prefix(3).map(\.name).joined(separator: "、"))」使用，请先删除相关预设")
+        }
+        do { try luts.delete(id) }
+        catch { return flash("删除 LUT 失败：\(error.localizedDescription)") }
         lutList = luts.list
-        if params.lut?.id == id { params.lut = nil }
-        if matched?.lut?.id == id { matched = nil }
+        forgetLUT(id)
     }
 
     // MARK: AI 设置（设置存在数据目录，Key 存钥匙串）

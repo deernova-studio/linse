@@ -25,7 +25,7 @@ enum ExportRequestError: LocalizedError {
     }
 }
 
-struct Summary {
+struct Summary: Equatable {
     var source: String
     var secs: Double
     var match: MatchSummary?
@@ -46,6 +46,9 @@ public final class AppState: ObservableObject {
     let proxy: Renderer
     private let exports: ExportService
     private var exportID: UUID?
+    private let matches: MatchService
+    private let aiKeyProvider: () -> String
+    private var matchID: UUID?
 
     @Published var params = Params() { didSet { paramsDidChange() } }
     @Published var matched: Params?
@@ -73,31 +76,37 @@ public final class AppState: ObservableObject {
     @Published var theme: ThemeMode = .auto { didSet { applyTheme() } }
     var aiTask: Task<Void, Never>?
     let luts: LutStore
+    private let presetStore: PresetStore
+    private(set) var presetLoadFailed = false
     let smartMasks = SmartMaskStore()
 
     private var suppressEdit = false
     private var histTask: Task<Void, Never>?
-    private var undo: [Params] = [Params()]
-    private var undoIdx = 0
+    private var history = EditHistory()
     private var undoTimer: Task<Void, Never>?
 
     public convenience init() {
         self.init(luts: LutStore(dir: Self.dataDir.appendingPathComponent("luts", isDirectory: true)),
-                  theme: ThemeMode(rawValue: UserDefaults.standard.string(forKey: "theme") ?? "") ?? .auto)
+                  theme: ThemeMode(rawValue: UserDefaults.standard.string(forKey: "theme") ?? "") ?? .auto,
+                  presetStore: PresetStore(url: Self.dataDir.appendingPathComponent("presets.json")))
         loadPresets()
         loadAISettings()
     }
 
     /// 注入资源库，方便测试编辑流程而不读取用户设置或钥匙串。
-    init(luts: LutStore, theme: ThemeMode = .auto) {
+    init(luts: LutStore, theme: ThemeMode = .auto, presetStore: PresetStore? = nil, matchService: MatchService? = nil,
+         aiKeyProvider: @escaping () -> String = { ProcessInfo.processInfo.environment["LINSE_AI_KEY"] ?? AIKeychain.load() }) {
         do {
             display = try Renderer()
             proxy = try Renderer(device: display.device)
             exports = ExportService(device: display.device)
+            matches = matchService ?? MatchService(device: display.device)
         } catch {
             fatalError("Metal 不可用：\(error.localizedDescription)")
         }
         self.luts = luts
+        self.presetStore = presetStore ?? PresetStore(url: luts.dir.appendingPathComponent("presets.json"))
+        self.aiKeyProvider = aiKeyProvider
         display.luts = luts
         proxy.luts = luts
         display.maskBitmaps = smartMasks
@@ -124,22 +133,34 @@ public final class AppState: ObservableObject {
         scheduleHistogram()
         if !suppressEdit {
             // 手动改了参数：强度条不再代表当前状态
-            if matched != nil { matched = nil }
+            if matched != nil { matched = nil; strength = 100 }
             scheduleUndoCommit()
         }
     }
 
-    /// 程序内部整体替换参数（匹配、预设、撤销），不算手动编辑
-    func setParams(_ p: Params, commit: Bool = true) {
+    private var editSnapshot: EditorSnapshot {
+        EditorSnapshot(params: params, matched: matched, strength: strength, summary: summary)
+    }
+
+    private func restoreEdit(_ snapshot: EditorSnapshot) {
         suppressEdit = true
-        params = p
+        params = snapshot.params
+        matched = snapshot.matched
+        strength = snapshot.strength
+        summary = snapshot.summary
         suppressEdit = false
-        if commit { commitUndo() }
+        if let id = selectedMask, !params.masks.contains(where: { $0.id == id }) { selectedMask = nil }
+    }
+
+    private func applyEdit(_ snapshot: EditorSnapshot) {
+        commitUndo()
+        restoreEdit(snapshot)
+        commitUndo()
     }
 
     func setStrength(_ v: Double) {
-        strength = v
         guard let m = matched else { return }
+        strength = v
         var p = Estimator.scaled(m, v / 100)
         p.masks = params.masks
         suppressEdit = true; params = p; suppressEdit = false
@@ -159,31 +180,35 @@ public final class AppState: ObservableObject {
 
     func commitUndo() {
         undoTimer?.cancel()
-        undo.removeSubrange((undoIdx + 1)...)
-        if undo.last != params { undo.append(params) }
-        if undo.count > 100 { undo.removeFirst() }
-        undoIdx = undo.count - 1
+        undoTimer = nil
+        history.record(editSnapshot)
     }
 
     func undoAction() {
-        if undoTimer != nil { commitUndo(); undoTimer = nil }
-        guard undoIdx > 0 else { return flash("没有可以撤销的操作") }
-        undoIdx -= 1
-        suppressEdit = true; params = undo[undoIdx]; suppressEdit = false
+        commitUndo()
+        guard let snapshot = history.undo() else { return flash("没有可以撤销的操作") }
+        restoreEdit(snapshot)
         flash("已撤销")
     }
 
     func redoAction() {
-        guard undoIdx < undo.count - 1 else { return flash("没有可以重做的操作") }
-        undoIdx += 1
-        suppressEdit = true; params = undo[undoIdx]; suppressEdit = false
+        commitUndo()
+        guard let snapshot = history.redo() else { return flash("没有可以重做的操作") }
+        restoreEdit(snapshot)
         flash("已重做")
     }
 
     func reset() {
-        matched = nil; summary = nil
-        setParams(Params())
+        applyEdit(EditorSnapshot())
         flash("已复位")
+    }
+
+    /// LUT 删除是资源操作，不允许历史记录重新引入已不存在的资源。
+    func forgetLUT(_ id: String) {
+        commitUndo()
+        history.removeLUT(id)
+        restoreEdit(editSnapshot.removingLUT(id))
+        thumbnails.removeAll()
     }
 
     // MARK: 载入
@@ -219,7 +244,7 @@ public final class AppState: ObservableObject {
         switch kind {
         case .source:
             do {
-                try display.setImage(ci: ci)
+                try display.setImage(ci: ci, maxSide: display.maxTextureSize)
                 try proxy.setImage(ci: ci, maxSide: 320)
             } catch { return flash(error.localizedDescription) }
             source = slot
@@ -231,6 +256,7 @@ public final class AppState: ObservableObject {
         case .target:
             target = slot
         }
+        history.invalidateMatchSummaries()
         if summary != nil, summary?.source.hasPrefix("预设") == false { summary?.stale = true }
     }
 
@@ -244,59 +270,33 @@ public final class AppState: ObservableObject {
             showAISettings = true
             return flash("先填写 API Key")
         }
-        let ai = aiSettings, key = useAI ? (ProcessInfo.processInfo.environment["LINSE_AI_KEY"] ?? AIKeychain.load()) : ""
+        let ai = aiSettings, key = useAI ? aiKeyProvider() : ""
+        let id = UUID()
+        matchID = id
         busy = useAI ? "AI（\(ai.model)\(ai.effort == .auto ? "" : " · 思考强度 \(ai.effort.rawValue)")\(ai.fast ? " · 快速" : "")）正在看图…" : "分析目标照片…"
-        let proxy = Box(self.proxy), ctx = Box(display.ciContext)
-        let t0 = Date()
-        aiTask = Task.detached(priority: .userInitiated) { [weak self] in
+        let matches = self.matches
+        aiTask = Task(priority: .userInitiated) { [weak self] in
             do {
-                let r = proxy.v
-                func measure(_ ci: CIImage) throws -> ImageStats {
-                    try r.setImage(ci: ci, maxSide: 320)
-                    let w = Int(r.imageSize.width), h = Int(r.imageSize.height)
-                    let px = try r.renderRGBA8(Params(), width: w, height: h, opts: RenderOptions(bypass: true))
-                    return Stats.compute(px, weights: Stats.detailWeights(px, width: w))
+                let result = try await matches.match(source: source.ci, target: target.ci, ai: useAI ? ai : nil, key: key) { [weak self] message in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.matchID == id else { return }
+                        self.busy = message
+                    }
                 }
-                var found: AIAnalysis?
-                if useAI {
-                    // 把和估计器同一套的实测统计一起发给模型，让它以测量为准、以看图判断内容
-                    let stats = ["source": AIAnalysis.statsJSON(try measure(source.ci)), "target": AIAnalysis.statsJSON(try measure(target.ci))]
-                    let imgs = AIImages(source: try Self.jpegBase64(source.ci, ctx.v), target: try Self.jpegBase64(target.ci, ctx.v),
-                                        stats: try JSONSerialization.data(withJSONObject: stats, options: [.sortedKeys]))
-                    found = try await AIClient.analyze(ai, key: key, images: imgs)
-                    try Task.checkCancellation()
-                    await MainActor.run { self?.busy = "分析目标照片…" }
-                }
-                let tStats = try measure(target.ci)
-                try r.setImage(ci: source.ci, maxSide: 320)
-                let analysis = found
-                let label = analysis != nil ? "按 AI 初值精确对齐" : "正在对齐"
-                let (p, sm) = try Estimator.match(r, target: tStats, options: MatchOptions(prior: analysis?.prior, portraitHint: analysis?.isPortrait, onProgress: { stage in
-                    Task { @MainActor in self?.busy = "\(label)：\(stage)" }
-                }))
                 try Task.checkCancellation()
-                await MainActor.run {
-                    guard let self else { return }
-                    var np = p
-                    np.masks = self.params.masks
-                    self.setParams(np)
-                    self.matched = np
-                    self.strength = 100
-                    let secs = Date().timeIntervalSince(t0)
-                    self.summary = Summary(source: analysis != nil ? "AI 辅助匹配" : "计算匹配", secs: secs, match: sm,
-                                           ai: analysis, aiCorrections: analysis?.corrections(final: np) ?? [])
-                    self.busy = nil
-                    self.aiTask = nil
-                    self.flash(String(format: "匹配完成 · %.1f 秒", secs))
-                }
+                guard let self, self.matchID == id else { return }
+                var params = result.params
+                params.masks = self.params.masks
+                self.applyEdit(EditorSnapshot(params: params, matched: params, summary:
+                    Summary(source: result.analysis == nil ? "计算匹配" : "AI 辅助匹配", secs: result.seconds, match: result.summary,
+                            ai: result.analysis, aiCorrections: result.analysis?.corrections(final: params) ?? [])))
+                self.finishMatch(id)
+                self.flash(String(format: "匹配完成 · %.1f 秒", result.seconds))
             } catch {
-                await MainActor.run {
-                    guard let self else { return }
-                    self.busy = nil
-                    self.aiTask = nil
-                    if error is CancellationError || (error as? URLError)?.code == .cancelled { return self.flash("已取消") }
-                    self.flash("\(useAI ? "AI 分析" : "匹配")失败：\(error.localizedDescription)")
-                }
+                guard let self, self.matchID == id else { return }
+                self.finishMatch(id)
+                if error is CancellationError || (error as? URLError)?.code == .cancelled { return self.flash("已取消") }
+                self.flash("\(useAI ? "AI 分析" : "匹配")失败：\(error.localizedDescription)")
             }
         }
     }
@@ -305,14 +305,12 @@ public final class AppState: ObservableObject {
     var canCancel: Bool { aiTask != nil && (busy?.hasPrefix("AI") ?? false) }
     func cancelBusy() { aiTask?.cancel() }
 
-    nonisolated static func jpegBase64(_ ci: CIImage, _ ctx: CIContext, max side: CGFloat = 1024) throws -> String {
-        let e = ci.extent
-        let s = min(1, side / Swift.max(e.width, e.height))
-        let img = ci.transformed(by: CGAffineTransform(scaleX: s, y: s))
-        guard let d = ctx.jpegRepresentation(of: img, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!,
-                                             options: [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): 0.9])
-        else { throw AIError("图片编码失败") }
-        return d.base64EncodedString()
+    private func finishMatch(_ id: UUID) {
+        guard matchID == id else { return }
+        matchID = nil
+        aiTask = nil
+        busy = nil
+        scheduleHistogram()
     }
 
     // MARK: 直方图 / 预设缩略图（都用小图渲染，同一条管线）
@@ -332,6 +330,7 @@ public final class AppState: ObservableObject {
     }
 
     func thumbnail(for p: Preset) -> CGImage? {
+        if let ref = p.params.lut, luts.lut(id: ref.id) == nil { return nil }
         let key = p.id + (p.createdAt.map { "\($0.timeIntervalSince1970)" } ?? "")
         if let t = thumbnails[key] { return t }
         guard source != nil, busy == nil else { return nil }
@@ -349,41 +348,53 @@ public final class AppState: ObservableObject {
         return dir
     }
 
-    var presetsURL: URL { Self.dataDir.appendingPathComponent("presets.json") }
-
     func loadPresets() {
-        guard let data = try? Data(contentsOf: presetsURL), let list = try? JSONDecoder().decode([Preset].self, from: data) else { return }
-        userPresets = list
+        do {
+            userPresets = try presetStore.load()
+            presetLoadFailed = false
+        } catch {
+            presetLoadFailed = true
+            flash("读取预设失败：\(error.localizedDescription)")
+        }
     }
 
-    func savePresets() {
-        guard let data = try? JSONEncoder().encode(userPresets) else { return }
-        try? data.write(to: presetsURL, options: .atomic)
+    @discardableResult
+    private func savePresets(_ next: [Preset]) -> Bool {
+        guard !presetLoadFailed else { flash("预设读取失败，修复预设文件并重新载入后才能保存"); return false }
+        do {
+            try presetStore.save(next)
+            userPresets = next
+            return true
+        } catch {
+            flash("保存预设失败：\(error.localizedDescription)")
+            return false
+        }
     }
 
     func applyPreset(_ p: Preset) {
         guard busy == nil else { return }
         guard source != nil else { return flash("先导入一张照片") }
+        if let ref = p.params.lut, luts.lut(id: ref.id) == nil {
+            return flash("预设缺少 LUT「\(ref.name)」，请重新导入滤镜并保存预设")
+        }
         var np = p.params
         np.masks = params.masks
-        setParams(np)
-        matched = np
-        strength = 100
-        summary = Summary(source: "预设 · \(p.name)", secs: 0)
+        applyEdit(EditorSnapshot(params: np, matched: np, summary: Summary(source: "预设 · \(p.name)", secs: 0)))
         flash("已套用「\(p.name)」")
     }
 
     func saveCurrentAsPreset(name: String) {
         var p = params
         p.masks = []
-        userPresets.insert(Preset(id: UUID().uuidString, name: name.isEmpty ? "我的预设 \(userPresets.count + 1)" : name, params: p, createdAt: Date()), at: 0)
-        savePresets()
+        if let ref = p.lut, luts.lut(id: ref.id) == nil { return flash("保存预设失败：缺少 LUT「\(ref.name)」") }
+        var next = userPresets
+        next.insert(Preset(id: UUID().uuidString, name: name.isEmpty ? "我的预设 \(userPresets.count + 1)" : name, params: p, createdAt: Date()), at: 0)
+        guard savePresets(next) else { return }
         flash("已存为预设")
     }
 
     func deletePreset(_ p: Preset) {
-        userPresets.removeAll { $0.id == p.id }
-        savePresets()
+        savePresets(userPresets.filter { $0.id != p.id })
     }
 
     // MARK: 导出

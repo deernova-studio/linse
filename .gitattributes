@@ -1,0 +1,2 @@
+# Exact pixel fixtures must never undergo text or newline conversion.
+Tests/LinseCoreTests/Fixtures/Electron/*.rgba binary
