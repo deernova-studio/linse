@@ -241,10 +241,10 @@ struct PanelSection<Content: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             Button { withAnimation(.easeOut(duration: 0.15)) { open.toggle() } } label: {
                 HStack {
-                    Text(title).font(.system(size: 10.5)).kerning(2).foregroundStyle(.secondary)
+                    Text(title).font(AppTypography.sectionTitle).foregroundStyle(.primary)
                     Spacer()
                     if changed { Circle().fill(Color.primary).frame(width: 4, height: 4) }
-                    Image(systemName: "chevron.down").font(.system(size: 9, weight: .light)).rotationEffect(.degrees(open ? 0 : -90)).foregroundStyle(.secondary)
+                    Image(systemName: "chevron.down").font(.system(size: 10)).rotationEffect(.degrees(open ? 0 : -90)).foregroundStyle(.secondary)
                 }
                 .padding(.horizontal, 14).padding(.vertical, 11).contentShape(Rectangle())
             }
@@ -258,7 +258,7 @@ struct PanelSection<Content: View>: View {
 struct GroupTitle: View {
     let t: String
     init(_ t: String) { self.t = t }
-    var body: some View { Text(t).font(.system(size: 10)).kerning(1.6).foregroundStyle(.tertiary).padding(.top, 10).padding(.bottom, 2) }
+    var body: some View { Text(t).font(AppTypography.groupTitle).foregroundStyle(.secondary).padding(.top, 10).padding(.bottom, 2) }
 }
 
 struct TabText: View {
@@ -266,7 +266,7 @@ struct TabText: View {
     init(_ t: String, on: Bool, action: @escaping () -> Void) { self.t = t; self.on = on; self.action = action }
     var body: some View {
         Button(action: action) {
-            Text(t).font(.system(size: 11)).foregroundStyle(on ? .primary : .secondary)
+            Text(t).font(AppTypography.tab).foregroundStyle(on ? .primary : .secondary)
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .overlay(alignment: .bottom) { if on { Rectangle().frame(height: 1) } }
         }

@@ -212,11 +212,11 @@ struct EmptyGuide: View {
     @ObservedObject var state: AppState
     var body: some View {
         HStack(spacing: 0) {
-            step(1, "导入你的照片", "⌘O") { state.open(.source) }
+            step(1, "导入你的照片", "⌘ O") { state.open(.source) }
             Divider()
-            step(2, "导入目标风格", "⇧⌘O") { state.open(.target) }
+            step(2, "导入目标风格", "⇧ ⌘ O") { state.open(.target) }
             Divider()
-            step(3, "匹配", "⌘↩") { state.runMatch() }
+            step(3, "匹配", "⌘ ↩") { state.runMatch() }
         }
         .frame(maxWidth: 720, maxHeight: 140)
         .overlay(Rectangle().stroke(Color.primary.opacity(0.12), lineWidth: 1))
@@ -225,15 +225,24 @@ struct EmptyGuide: View {
 
     func step(_ n: Int, _ title: String, _ key: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("\(n)").font(.system(size: 11)).frame(width: 18, height: 18).overlay(Circle().stroke(Color.secondary.opacity(0.5)))
-                Text(title).font(.system(size: 14)).lineLimit(1)
-                Text(key).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 10) {
+                Text("\(n)").font(AppTypography.groupTitle).monospacedDigit()
+                    .foregroundStyle(.secondary).frame(width: 18, height: 18)
+                    .overlay(Circle().stroke(Color.primary.opacity(0.18)))
+                    .accessibilityHidden(true)
+                Text(title).font(AppTypography.guideTitle).lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(key).font(AppTypography.shortcut).foregroundStyle(.secondary)
+                    .padding(.horizontal, 6).padding(.vertical, 3)
+                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 4))
+                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.primary.opacity(0.12), lineWidth: 0.5))
+                    .fixedSize().accessibilityHidden(true)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .padding(24)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .help("\(title)（\(key)）")
     }
 }

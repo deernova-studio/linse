@@ -53,8 +53,9 @@ struct SlotView: View {
                 }
                 .frame(height: 84).clipped()
                 .overlay(Rectangle().stroke(Color.primary.opacity(hover ? 0.4 : 0.14), style: StrokeStyle(lineWidth: 1, dash: slot == nil ? [3, 3] : [])))
-                Text(title).font(.system(size: 11)).foregroundStyle(.secondary)
-                Text(slot.map { "\(Int($0.size.width))×\(Int($0.size.height))" } ?? "点击或拖入").font(.system(size: 10).monospacedDigit()).foregroundStyle(.tertiary).lineLimit(1)
+                Text(title).font(AppTypography.sectionTitle).foregroundStyle(.primary)
+                Text(slot.map { "\(Int($0.size.width))×\(Int($0.size.height))" } ?? "点击或拖入")
+                    .font(AppTypography.metadata).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
             }
             .contentShape(Rectangle())
         }
