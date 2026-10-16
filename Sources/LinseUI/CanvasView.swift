@@ -152,7 +152,7 @@ struct StageView: View {
                         .padding(18).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
                 }
             }
-            .onChange(of: state.split) { _ in state.redrawTick &+= 1 }
+            .onChange(of: state.split) { state.redrawTick &+= 1 }
         }
         .onDrop(of: [.fileURL], isTargeted: $dropTarget) { providers in
             let kinds: [AppState.SlotKind] = providers.count >= 2 ? [.source, .target] : [state.source != nil && state.target == nil ? .target : .source]

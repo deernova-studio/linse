@@ -65,7 +65,7 @@ public struct CubeLut: Sendable {
         } } }
         let saved = r.image
         defer { if let saved { r.setImage(texture: saved) } }
-        r.setImage(rgba: px, width: W, height: H)
+        try r.setImage(rgba: px, width: W, height: H)
         let out = try r.renderRGBA8(lutParams(p), width: W, height: H)
         var lines = ["TITLE \"\(title.replacingOccurrences(of: "\"", with: ""))\"", "LUT_3D_SIZE \(size)", "DOMAIN_MIN 0.0 0.0 0.0", "DOMAIN_MAX 1.0 1.0 1.0"]
         lines.reserveCapacity(size * size * size + 4)

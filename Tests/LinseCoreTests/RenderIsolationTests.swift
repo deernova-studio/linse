@@ -34,7 +34,7 @@ final class RenderIsolationTests: XCTestCase {
         let width = 8, height = 6
         let colors: [[UInt8]] = [[128, 128, 128, 255], [200, 70, 50, 255], [50, 130, 200, 255]]
         let pixels = (0..<(width * height)).flatMap { colors[$0 % colors.count] }
-        renderer.setImage(rgba: pixels, width: width, height: height)
+        try renderer.setImage(rgba: pixels, width: width, height: height)
         let expected = try settings.map { try renderer.renderRGBA8($0, width: width, height: height) }
         XCTAssertNotEqual(expected[0], expected[1], "测试参数必须产生不同的图像", file: file, line: line)
 

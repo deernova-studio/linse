@@ -11,6 +11,6 @@ node scripts/generate-parity-fixtures.cjs /path/to/electron-checkout
 swift test --filter ParityTests
 ```
 
-Review reference-source changes and the resulting fixtures before accepting regeneration. Both the RGBA8 input path and the app's Core Image input path must have mean RGB byte error ≤ 0.5 and maximum error ≤ 4. Those limits allow GPU quantization differences but reject visible aggregate shifts and isolated large errors; an intentional color-shift test verifies the gate.
+Review reference-source changes and the resulting fixtures before accepting regeneration. All three input paths (RGBA8, Core Image, and CGImage) must have mean RGB byte error ≤ 0.5 and maximum error ≤ 4. Those limits allow GPU quantization differences but reject visible aggregate shifts and isolated large errors; an intentional color-shift test verifies the gate.
 
 Tiled export is independently compared against a whole-frame render with spatial effects enabled, including the final partial tile. RGBA8 maximum error is one byte level. The 16-bit comparison bounds normalized error to 1/1024 (less than one quarter of an 8-bit level), allowing floating-point coordinate interpolation between different viewports.

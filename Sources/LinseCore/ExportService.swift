@@ -36,8 +36,7 @@ public actor ExportService {
                            progress: (@Sendable (Int, Int) -> Void)? = nil) throws -> CGImage {
         try Task.checkCancellation()
         return try withRenderer(assets: assets) { renderer in
-            try renderer.setImage(ci: source)
-            let image = try Exporter.render(renderer, params, format: format, progress: progress)
+            let image = try Exporter.render(source, using: renderer, params: params, format: format, progress: progress)
             try Task.checkCancellation()
             try Exporter.write(image, to: url, format: format)
             return image
@@ -61,6 +60,8 @@ public actor ExportService {
         renderer.maskBitmaps = provider
         defer {
             renderer.releaseImage()
+            renderer.offscreenCache.removeAll()
+            renderer.maskTexCache.removeAll()
             renderer.luts = nil
             renderer.maskBitmaps = nil
         }

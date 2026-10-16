@@ -98,3 +98,5 @@ All six review findings are implemented. The implementation was reviewed again f
 ### Remaining product limit
 
 Original-size export beyond the GPU texture limit now fails explicitly before writing the destination. Streaming support for larger images is not implemented. Preview and matching still accept explicit downscaling.
+
+Follow-up: this describes the state at commit `2eec408`. The subsequent [runtime fixes](2026-10-16-remaining-runtime-fixes.md) implement original-size export beyond the GPU texture limit with bounded input tiles and file-backed output pixels.

@@ -11,7 +11,7 @@ final class ParityTests: XCTestCase {
     func testIdentity() throws {
         let renderer = try Renderer()
         let pixels = syntheticPixels(width: 64, height: 48)
-        renderer.setImage(rgba: pixels, width: 64, height: 48)
+        try renderer.setImage(rgba: pixels, width: 64, height: 48)
         let output = try renderer.renderRGBA8(Params(), width: 64, height: 48)
         XCTAssertLessThanOrEqual(try difference(output, pixels).maximum, 1)
     }
@@ -23,12 +23,14 @@ final class ParityTests: XCTestCase {
         XCTAssertEqual(source.count, manifest.width * manifest.height * 4)
         XCTAssertEqual(Set(manifest.cases.map(\.id)), Set(["identity", "channel-curves", "all-hsl"] + Preset.builtins.map(\.id)))
         let renderer = try Renderer()
-        for useCoreImage in [false, true] {
-            if useCoreImage {
-                let image = try XCTUnwrap(Exporter.cgImage(rgba: source, width: manifest.width, height: manifest.height))
+        let image = try XCTUnwrap(Exporter.cgImage(rgba: source, width: manifest.width, height: manifest.height))
+        for input in ["RGBA8", "CoreImage", "CGImage"] {
+            if input == "CoreImage" {
                 try renderer.setImage(ci: CIImage(cgImage: image))
+            } else if input == "CGImage" {
+                try renderer.setImage(image)
             } else {
-                renderer.setImage(rgba: source, width: manifest.width, height: manifest.height)
+                try renderer.setImage(rgba: source, width: manifest.width, height: manifest.height)
             }
             for item in manifest.cases {
                 if let preset = Preset.builtins.first(where: { $0.id == item.id }) {
@@ -37,7 +39,7 @@ final class ParityTests: XCTestCase {
                 let reference = [UInt8](try Data(contentsOf: directory.appendingPathComponent(item.id + ".rgba")))
                 let output = try renderer.renderRGBA8(item.params, width: manifest.width, height: manifest.height)
                 let error = try difference(output, reference)
-                let context = "\(item.id) / \(useCoreImage ? "CoreImage" : "RGBA8"): mean=\(error.mean), max=\(error.maximum)"
+                let context = "\(item.id) / \(input): mean=\(error.mean), max=\(error.maximum)"
                 XCTAssertLessThanOrEqual(error.mean, meanTolerance, context)
                 XCTAssertLessThanOrEqual(error.maximum, maximumTolerance, context)
             }
@@ -57,7 +59,7 @@ final class ParityTests: XCTestCase {
     func testTiledExportMatchesWhole() throws {
         let width = 2053, height = 37 // 两块，包括非整块宽度；不依赖外部照片。
         let renderer = try Renderer()
-        renderer.setImage(rgba: syntheticPixels(width: width, height: height), width: width, height: height)
+        try renderer.setImage(rgba: syntheticPixels(width: width, height: height), width: width, height: height)
         var params = Preset.builtins[0].params
         params.effects.sharpen = 60
         params.effects.clarity = 30

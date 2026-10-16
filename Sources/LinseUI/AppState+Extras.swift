@@ -23,29 +23,42 @@ extension AppState {
     }
 
     /// 在后台识别人物/主体/天空；完成后在主线程回调
-    func detect(_ type: MaskType, then done: (() -> Void)? = nil) {
+    func detect(_ type: MaskType, then done: (@MainActor () -> Void)? = nil) {
         guard busy == nil else { return flash("正在处理，请稍候") }
         guard let ci = source?.ci else { return flash("先导入照片") }
+        let id = UUID(), service = maskService
+        maskRequestID = id
         busy = "正在识别\(type.label)…"
-        let ctx = Box(display.ciContext), store = smartMasks
-        Task.detached(priority: .userInitiated) { [weak self] in
-            let result = Result { try SmartMask.compute(type, image: ci, context: ctx.v) }
-            await MainActor.run {
-                guard let self else { return }
-                self.busy = nil
-                self.scheduleHistogram()
-                switch result {
-                case .success(let b):
-                    // 识别期间换了图，结果作废
-                    guard self.source?.ci === ci else { return }
-                    store.set(type, b)
-                    self.redrawTick &+= 1
-                    done?()
-                case .failure(let e):
-                    self.flash(e.localizedDescription)
-                }
+        maskTask = Task(priority: .userInitiated) { [weak self] in
+            do {
+                let bitmap = try await service.detect(type, image: ci)
+                try Task.checkCancellation()
+                guard let self, self.maskRequestID == id else { return }
+                self.finishMaskDetection()
+                guard self.source?.ci === ci else { return }
+                self.smartMasks.set(type, bitmap)
+                self.redrawTick &+= 1
+                done?()
+            } catch {
+                guard let self, self.maskRequestID == id else { return }
+                self.finishMaskDetection()
+                guard self.source?.ci === ci, !(error is CancellationError) else { return }
+                self.flash(error.localizedDescription)
             }
         }
+    }
+
+    func invalidateMaskDetection() {
+        guard maskRequestID != nil else { return }
+        maskTask?.cancel()
+        finishMaskDetection()
+    }
+
+    private func finishMaskDetection() {
+        maskRequestID = nil
+        maskTask = nil
+        busy = nil
+        scheduleHistogram()
     }
 
     /// 换图后，已有的识别类蒙版按新图重新识别

@@ -8,14 +8,16 @@ import simd
 
 public enum RenderError: Error, LocalizedError {
     case noDevice, shader(String), texture(String)
+    case invalidImageSize
     case imageTooLarge(width: Int, height: Int, limit: Int)
     public var errorDescription: String? {
         switch self {
         case .noDevice: return "这台设备不支持 Metal"
         case .shader(let s): return "着色器编译失败：\(s)"
         case .texture(let s): return "纹理创建失败：\(s)"
+        case .invalidImageSize: return "图片尺寸无效，请导入有限尺寸的图片"
         case .imageTooLarge(let width, let height, let limit):
-            return "图片尺寸 \(width)×\(height) 超过设备上限 \(limit) 像素，无法原尺寸导出；请先缩小图片"
+            return "图片尺寸 \(width)×\(height) 超过单张纹理上限 \(limit) 像素"
         }
     }
 }
@@ -25,6 +27,7 @@ struct Uniforms {
     var p0 = SIMD4<Float>(), p1 = SIMD4<Float>(), p2 = SIMD4<Float>(), p3 = SIMD4<Float>()
     var p4 = SIMD4<Float>(), p5 = SIMD4<Float>(), p6 = SIMD4<Float>(), p7 = SIMD4<Float>()
     var region = SIMD4<Float>(0, 0, 1, 1)
+    var inputRegion = SIMD4<Float>(0, 0, 1, 1), sharpRegion = SIMD4<Float>(0, 0, 1, 1)
     var gradeSh = SIMD4<Float>(), gradeMid = SIMD4<Float>(), gradeHi = SIMD4<Float>(), gradeLum = SIMD4<Float>()
 }
 
@@ -50,6 +53,7 @@ public final class Renderer {
     public let device: MTLDevice
     let queue: MTLCommandQueue
     let library: MTLLibrary
+    let downsamplePipeline: MTLComputePipelineState
     var pipelines: [MTLPixelFormat: MTLRenderPipelineState] = [:]
     private var curveTex: MTLTexture, hslTex: MTLTexture
     private var curveKey = Curves()
@@ -57,7 +61,8 @@ public final class Renderer {
     var lutTex: MTLTexture
     var lutTexId: String?
     public private(set) var image: MTLTexture?
-    public var imageSize: CGSize { image.map { CGSize(width: $0.width, height: $0.height) } ?? .zero }
+    var tiledInput: TiledRenderInput?
+    public var imageSize: CGSize { tiledInput?.size ?? image.map { CGSize(width: $0.width, height: $0.height) } ?? .zero }
     public weak var luts: LutProvider?
     public weak var maskBitmaps: MaskBitmapProvider?
     var maskTexCache: [String: MTLTexture] = [:]
@@ -75,6 +80,8 @@ public final class Renderer {
         self.device = device
         queue = device.makeCommandQueue()!
         do { library = try device.makeLibrary(source: shaderSource, options: nil) } catch { throw RenderError.shader(error.localizedDescription) }
+        guard let downsample = library.makeFunction(name: "downsampleTile") else { throw RenderError.shader("缺少降采样函数") }
+        downsamplePipeline = try device.makeComputePipelineState(function: downsample)
         curveTex = try Self.lookupTexture(Curve.lut(Params()), device: device)
         hslTex = try Self.lookupTexture(HSLTable.build(Params()), device: device)
         let d3 = MTLTextureDescriptor()
@@ -98,24 +105,35 @@ public final class Renderer {
     /// 载入图片为带 mipmap 的纹理（清晰度、去雾、锐化要用 mipmap 取低频）。像素按 sRGB 编码值存放，不做自动解码。
     public func setImage(_ cg: CGImage) throws {
         let loader = MTKTextureLoader(device: device)
-        image = try loader.newTexture(cgImage: cg, options: [
-            .SRGB: false, .generateMipmaps: true, .textureUsage: MTLTextureUsage.shaderRead.rawValue,
+        let texture = try loader.newTexture(cgImage: cg, options: [
+            .SRGB: false, .allocateMipmaps: true, .textureUsage: MTLTextureUsage([.shaderRead, .shaderWrite, .pixelFormatView]).rawValue,
             .textureStorageMode: MTLStorageMode.private.rawValue, .origin: MTKTextureLoader.Origin.topLeft,
         ])
+        guard let command = queue.makeCommandBuffer() else { throw RenderError.texture("图片命令缓冲") }
+        try generateMipmaps(texture, command: command)
+        command.commit(); command.waitUntilCompleted()
+        if let error = command.error { throw error }
+        image = texture
+        tiledInput = nil
     }
 
     /// 直接用 RGBA8 像素建图（估计器测目标图、烘焙 LUT 网格用）
-    public func setImage(rgba: [UInt8], width: Int, height: Int) {
+    public func setImage(rgba: [UInt8], width: Int, height: Int) throws {
+        guard width > 0, height > 0, width <= maxTextureSize, height <= maxTextureSize,
+              rgba.count == width * height * 4 else { throw RenderError.invalidImageSize }
         let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: width, height: height, mipmapped: true)
-        d.usage = .shaderRead
-        let t = device.makeTexture(descriptor: d)!
+        d.usage = [.shaderRead, .shaderWrite, .pixelFormatView]
+        guard let t = device.makeTexture(descriptor: d), let cb = queue.makeCommandBuffer() else { throw RenderError.texture("图片缓冲") }
         rgba.withUnsafeBytes { t.replace(region: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0, withBytes: $0.baseAddress!, bytesPerRow: width * 4) }
-        let cb = queue.makeCommandBuffer()!, bl = cb.makeBlitCommandEncoder()!
-        bl.generateMipmaps(for: t); bl.endEncoding(); cb.commit(); cb.waitUntilCompleted()
+        try generateMipmaps(t, command: cb); cb.commit(); cb.waitUntilCompleted()
+        if let error = cb.error { throw error }
         image = t
+        tiledInput = nil
     }
 
-    public func setImage(texture: MTLTexture) { image = texture }
+    public func setImage(texture: MTLTexture) { image = texture; tiledInput = nil }
+
+    func setTile(texture: MTLTexture, input: TiledRenderInput) { image = texture; tiledInput = input }
 
     public lazy var ciContext = CIContext(mtlDevice: device, options: [.workingColorSpace: CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!, .cacheIntermediates: false])
 
@@ -123,12 +141,12 @@ public final class Renderer {
     /// maxSide 为 nil 时保持原尺寸，超出设备上限则报错；预览/估计器必须显式指定缩放上限。
     public func setImage(ci: CIImage, maxSide: Int? = nil) throws {
         var img = ci
-        let ext = img.extent.integral
-        var w = Int(ext.width), h = Int(ext.height)
+        var (w, h) = try Self.imageDimensions(ci)
         if maxSide == nil && max(w, h) > maxTextureSize {
             throw RenderError.imageTooLarge(width: w, height: h, limit: maxTextureSize)
         }
         let limit = min(maxSide ?? maxTextureSize, maxTextureSize)
+        guard limit > 0 else { throw RenderError.invalidImageSize }
         if max(w, h) > limit {
             let s = Double(limit) / Double(max(w, h))
             let f = CIFilter(name: "CILanczosScaleTransform")!
@@ -141,23 +159,61 @@ public final class Renderer {
         img = img.transformed(by: CGAffineTransform(translationX: -e.minX, y: -e.minY))
             .transformed(by: CGAffineTransform(scaleX: 1, y: -1).translatedBy(x: 0, y: -CGFloat(h)))
         let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba16Float, width: w, height: h, mipmapped: true)
-        d.usage = [.shaderRead, .shaderWrite, .renderTarget]
+        d.usage = [.shaderRead, .shaderWrite, .renderTarget, .pixelFormatView]
         d.storageMode = .private
         guard let t = device.makeTexture(descriptor: d), let cb = queue.makeCommandBuffer() else { throw RenderError.texture("\(w)×\(h)") }
         // 按 sRGB 编码值写入（着色器里自己做线性化），和 Electron 版的输入一致
         ciContext.render(img, to: t, commandBuffer: cb, bounds: CGRect(x: 0, y: 0, width: w, height: h), colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!)
-        let bl = cb.makeBlitCommandEncoder()!
-        bl.generateMipmaps(for: t); bl.endEncoding()
+        try generateMipmaps(t, command: cb)
         cb.commit(); cb.waitUntilCompleted()
+        if let error = cb.error { throw error }
         image = t
+        tiledInput = nil
     }
-    public func releaseImage() { image = nil }
+    public func releaseImage() { image = nil; tiledInput = nil }
+
+    static func imageDimensions(_ image: CIImage) throws -> (Int, Int) {
+        let extent = image.extent.integral
+        guard !extent.isNull, !extent.isInfinite, extent.minX.isFinite, extent.minY.isFinite,
+              extent.width.isFinite, extent.height.isFinite, extent.width > 0, extent.height > 0,
+              extent.width < CGFloat(Int.max), extent.height < CGFloat(Int.max) else { throw RenderError.invalidImageSize }
+        return (Int(extent.width), Int(extent.height))
+    }
+
+    /// 整图和分块共用明确的逐级降采样，避免系统 blit 在合并多层计算时采用不同的半精度舍入。
+    private func generateMipmaps(_ texture: MTLTexture, command: MTLCommandBuffer) throws {
+        guard texture.mipmapLevelCount > 1 else { return }
+        for level in 1..<texture.mipmapLevelCount {
+            guard let source = texture.makeTextureView(pixelFormat: texture.pixelFormat, textureType: .type2D,
+                levels: (level - 1)..<level, slices: 0..<1),
+                  let target = texture.makeTextureView(pixelFormat: texture.pixelFormat, textureType: .type2D,
+                levels: level..<(level + 1), slices: 0..<1) else { throw RenderError.texture("图片 mip 层") }
+            try encodeDownsample(source, into: target, sourceSize: CGSize(width: source.width, height: source.height),
+                inputArea: CGRect(x: 0, y: 0, width: source.width, height: source.height),
+                outputOrigin: .zero, outputSize: CGSize(width: target.width, height: target.height), command: command)
+        }
+    }
+
+    func encodeDownsample(_ input: MTLTexture, into output: MTLTexture, sourceSize: CGSize, inputArea: CGRect,
+                          outputOrigin: CGPoint, outputSize: CGSize, command: MTLCommandBuffer) throws {
+        guard let encoder = command.makeComputeCommandEncoder() else { throw RenderError.texture("降采样编码器") }
+        let uniforms = [SIMD4<Float>(Float(inputArea.minX), Float(inputArea.minY), Float(inputArea.width), Float(inputArea.height)),
+                        SIMD4<Float>(Float(sourceSize.width), Float(sourceSize.height), Float(outputSize.width), Float(outputSize.height)),
+                        SIMD4<Float>(Float(outputOrigin.x), Float(outputOrigin.y), Float(output.width), Float(output.height))]
+        encoder.setComputePipelineState(downsamplePipeline)
+        encoder.setTexture(input, index: 0); encoder.setTexture(output, index: 1)
+        uniforms.withUnsafeBytes { encoder.setBytes($0.baseAddress!, length: $0.count, index: 0) }
+        let groupWidth = downsamplePipeline.threadExecutionWidth
+        encoder.dispatchThreads(MTLSize(width: output.width, height: output.height, depth: 1),
+            threadsPerThreadgroup: MTLSize(width: groupWidth, height: min(8, downsamplePipeline.maxTotalThreadsPerThreadgroup / groupWidth), depth: 1))
+        encoder.endEncoding()
+    }
 
     // MARK: 渲染
 
     func uniforms(_ p: Params, outWidth: Int, opts: RenderOptions) -> (Uniforms, [MaskU]) {
         guard let img = image else { return (Uniforms(), []) }
-        let W = Float(img.width), H = Float(img.height)
+        let W = Float(tiledInput?.size.width ?? CGFloat(img.width)), H = Float(tiledInput?.size.height ?? CGFloat(img.height))
         var u = Uniforms()
         let wb = WhiteBalance.matrix(temperature: p.temperature, tint: p.tint)
         u.wb0 = SIMD4(wb[0], wb[1], wb[2], 0); u.wb1 = SIMD4(wb[3], wb[4], wb[5], 0); u.wb2 = SIMD4(wb[6], wb[7], wb[8], 0)
@@ -166,7 +222,8 @@ public final class Renderer {
         let e = p.effects
         u.p2 = SIMD4(Float(e.clarity / 100), Float(e.dehaze / 100), Float(e.vignette / 100), Float(e.grain / 100))
         let lod = max(0, log2(max(W, H) / 48))
-        let viewLod = max(0, log2(W * opts.region.z / Float(max(outWidth, 1))))
+        let viewScale = W * opts.region.z / Float(max(outWidth, 1))
+        let viewLod: Float = viewScale > 1.000001 ? log2(viewScale) : 0
         u.p3 = SIMD4(Float(e.grainSize / 100), Float(e.sharpen / 100), lod, viewLod)
         var lutAmt: Float = 0, lutSize: Float = 2
         if let ref = p.lut, let l = luts?.lut(id: ref.id) {
@@ -180,9 +237,10 @@ public final class Renderer {
         let doHsl = !HSLTable.isIdentity(p)
         let g = p.grading
         let doGrade = [g.shadows, g.midtones, g.highlights].contains { $0.sat != 0 || $0.lum != 0 } || g.balance != 0
-        u.p6 = SIMD4(doCurve ? 1 : 0, doHsl ? 1 : 0, doGrade ? 1 : 0, 0)
-        u.p7 = SIMD4(W, H, 0, 0)
+        u.p6 = SIMD4(doCurve ? 1 : 0, doHsl ? 1 : 0, doGrade ? 1 : 0, tiledInput == nil ? 0 : 1)
+        u.p7 = SIMD4(W, H, Float(tiledInput?.blurBaseLevel ?? 0), 0)
         u.region = opts.region
+        if let input = tiledInput { u.inputRegion = input.region; u.sharpRegion = input.sharpRegion }
         u.gradeSh = SIMD4(gradeOffset(g.shadows), 0); u.gradeMid = SIMD4(gradeOffset(g.midtones), 0); u.gradeHi = SIMD4(gradeOffset(g.highlights), 0)
         u.gradeLum = SIMD4(Float(g.shadows.lum / 100), Float(g.midtones.lum / 100), Float(g.highlights.lum / 100), 0)
         var mu = masks.map { m -> MaskU in
@@ -274,6 +332,8 @@ public final class Renderer {
         enc.setFragmentTexture(curve, index: 1)
         enc.setFragmentTexture(hsl, index: 2)
         enc.setFragmentTexture(lutTex, index: 3)
+        enc.setFragmentTexture(tiledInput?.blur ?? img, index: 8)
+        enc.setFragmentTexture(tiledInput?.sharp ?? img, index: 9)
         for i in 0..<Params.maxMasks {
             let m = i < p.masks.count ? p.masks[i] : nil
             enc.setFragmentTexture(m.flatMap { $0.type.isSmart ? maskTexture($0.type) : nil } ?? blackTex, index: 4 + i)
@@ -309,7 +369,7 @@ public final class Renderer {
         let key = "\(fmt.rawValue)-\(w)x\(h)"
         if let t = offscreenCache[key] { return t }
         let d = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: fmt, width: w, height: h, mipmapped: false)
-        d.usage = [.renderTarget, .shaderRead]
+        d.usage = [.renderTarget, .shaderRead, .shaderWrite]
         d.storageMode = .shared
         guard let t = device.makeTexture(descriptor: d) else { throw RenderError.texture("\(w)×\(h)") }
         if offscreenCache.count > 8 { offscreenCache.removeAll() }

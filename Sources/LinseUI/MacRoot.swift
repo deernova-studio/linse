@@ -181,22 +181,29 @@ extension AppState {
         } catch { flash("导出失败：\(error.localizedDescription)") }
     }
 
-    /// 开发自测：LINSE_SNAPSHOT 等处理结束后截自己的窗口（自己的窗口不需要屏幕录制权限），LINSE_QUIT=1 截完退出
+    /// 开发自测：LINSE_SNAPSHOT 等处理结束后截自己的窗口，LINSE_QUIT=1 截完退出。
     func devSnapshot() {
         // 启动时不要让第一个数值框抢焦点
-        DispatchQueue.main.async { NSApp.windows.forEach { $0.makeFirstResponder(nil) } }
+        Task {
+            await Task.yield()
+            NSApp.windows.forEach { $0.makeFirstResponder(nil) }
+        }
         let env = ProcessInfo.processInfo.environment
         guard let out = env["LINSE_SNAPSHOT"] else { return }
         Task {
+            defer { if env["LINSE_QUIT"] == "1" { NSApp.terminate(nil) } }
             await waitIdle()
-            guard let w = NSApp.windows.first(where: { $0.isVisible }),
-                  let cg = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(w.windowNumber), [.boundsIgnoreFraming, .bestResolution]) else { return }
-            try? NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: out))
-            if let sh = w.attachedSheet,
-               let sc = CGWindowListCreateImage(.null, .optionIncludingWindow, CGWindowID(sh.windowNumber), [.boundsIgnoreFraming, .bestResolution]) {
-                try? NSBitmapImageRep(cgImage: sc).representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: out.replacingOccurrences(of: ".png", with: "-sheet.png")))
+            guard let window = NSApp.windows.first(where: { $0.isVisible }) else { return flash("开发截图失败：没有可见窗口") }
+            do {
+                let url = URL(fileURLWithPath: out)
+                try await WindowSnapshot.save(window, to: url)
+                if let sheet = window.attachedSheet {
+                    let sheetURL = url.deletingLastPathComponent().appendingPathComponent(url.deletingPathExtension().lastPathComponent + "-sheet.png")
+                    try await WindowSnapshot.save(sheet, to: sheetURL)
+                }
+            } catch {
+                flash("开发截图失败：\(error.localizedDescription)")
             }
-            if env["LINSE_QUIT"] == "1" { NSApp.terminate(nil) }
         }
     }
 }

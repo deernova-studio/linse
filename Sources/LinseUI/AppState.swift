@@ -3,9 +3,6 @@ import LinseCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// 渲染器不是线程安全的，只在一个后台任务里用；用这个包装把它交给后台任务
-final class Box<T>: @unchecked Sendable { let v: T; init(_ v: T) { self.v = v } }
-
 struct Slot {
     let name: String
     let ci: CIImage
@@ -49,6 +46,9 @@ public final class AppState: ObservableObject {
     private let matches: MatchService
     private let aiKeyProvider: () -> String
     private var matchID: UUID?
+    let maskService: SmartMaskService
+    var maskTask: Task<Void, Never>?
+    var maskRequestID: UUID?
 
     @Published var params = Params() { didSet { paramsDidChange() } }
     @Published var matched: Params?
@@ -95,12 +95,14 @@ public final class AppState: ObservableObject {
 
     /// 注入资源库，方便测试编辑流程而不读取用户设置或钥匙串。
     init(luts: LutStore, theme: ThemeMode = .auto, presetStore: PresetStore? = nil, matchService: MatchService? = nil,
+         maskService: SmartMaskService? = nil,
          aiKeyProvider: @escaping () -> String = { ProcessInfo.processInfo.environment["LINSE_AI_KEY"] ?? AIKeychain.load() }) {
         do {
             display = try Renderer()
             proxy = try Renderer(device: display.device)
             exports = ExportService(device: display.device)
             matches = matchService ?? MatchService(device: display.device)
+            self.maskService = maskService ?? SmartMaskService(device: display.device)
         } catch {
             fatalError("Metal 不可用：\(error.localizedDescription)")
         }
@@ -247,6 +249,7 @@ public final class AppState: ObservableObject {
                 try display.setImage(ci: ci, maxSide: display.maxTextureSize)
                 try proxy.setImage(ci: ci, maxSide: 320)
             } catch { return flash(error.localizedDescription) }
+            invalidateMaskDetection()
             source = slot
             thumbnails = [:]
             smartMasks.reset()

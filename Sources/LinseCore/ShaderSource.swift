@@ -8,6 +8,21 @@ using namespace metal;
 constant float3 LUMA = float3(0.2126, 0.7152, 0.0722);
 constant int MAX_MASKS = 4;
 
+// 在全图 mip 网格上采样；输入只是一块带边界像素的原图/上一层 mip。
+kernel void downsampleTile(texture2d<float, access::sample> input [[texture(0)]],
+                           texture2d<float, access::write> output [[texture(1)]],
+                           constant float4* region [[buffer(0)]], uint2 position [[thread_position_in_grid]]) {
+  float2 point = (float2(position) + region[2].xy + 0.5) / region[1].zw * region[1].xy - 0.5;
+  int2 base = int2(floor(point));
+  float2 weight = fract(point);
+  int2 local = base - int2(region[0].xy), limit = int2(region[0].zw) - 1;
+  float4 a = input.read(uint2(clamp(local, int2(0), limit)));
+  float4 b = input.read(uint2(clamp(local + int2(1, 0), int2(0), limit)));
+  float4 c = input.read(uint2(clamp(local + int2(0, 1), int2(0), limit)));
+  float4 d = input.read(uint2(clamp(local + int2(1, 1), int2(0), limit)));
+  output.write(mix(mix(a, b, weight.x), mix(c, d, weight.x), weight.y), position);
+}
+
 struct Uniforms {
   float4 wb0, wb1, wb2;          // 白平衡矩阵三行
   float4 p0;                     // exposure, contrast, high, shadow
@@ -19,6 +34,7 @@ struct Uniforms {
   float4 p6;                     // doCurve, doHsl, doGrade, -
   float4 p7;                     // imgW, imgH, -, -
   float4 region;                 // 输出对应原图的区域（左上原点，归一化）
+  float4 inputRegion, sharpRegion; // 分块输入与全图一级 mip 的局部范围
   float4 gradeSh, gradeMid, gradeHi, gradeLum;
 };
 
@@ -49,10 +65,32 @@ static float3 toGamma(float3 c) {
   return mix(c * 12.92, 1.055 * pow(c, float3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
 }
 
-static float3 blurAt(texture2d<float> img, sampler s, float2 uv, float lod, float2 imgSize) {
+static float3 blurAt(texture2d<float> img, sampler s, float2 uv, float lod, float2 imgSize, float baseLod = 0.0) {
   float2 o = exp2(lod) / imgSize * 0.5;
-  return 0.25 * (img.sample(s, uv + float2(o.x, o.y), level(lod)).rgb + img.sample(s, uv + float2(-o.x, o.y), level(lod)).rgb
-    + img.sample(s, uv + float2(o.x, -o.y), level(lod)).rgb + img.sample(s, uv + float2(-o.x, -o.y), level(lod)).rgb);
+  return 0.25 * (img.sample(s, uv + float2(o.x, o.y), level(lod - baseLod)).rgb + img.sample(s, uv + float2(-o.x, o.y), level(lod - baseLod)).rgb
+    + img.sample(s, uv + float2(o.x, -o.y), level(lod - baseLod)).rgb + img.sample(s, uv + float2(-o.x, -o.y), level(lod - baseLod)).rgb);
+}
+
+// 分块纹理和整图 mip 的尺寸不同，硬件归一化采样会有不同的亚像素舍入。
+// 在相同全图像素坐标上插值，让锐化在两条路径上保持一致。
+static float3 sharpSample(texture2d<float> img, float2 uv, float2 mipSize, int2 origin, uint level) {
+  float2 point = uv * mipSize - 0.5;
+  int2 local = int2(floor(point)) - origin;
+  int2 limit = int2(img.get_width(level), img.get_height(level)) - 1;
+  float2 weight = fract(point);
+  float3 a = img.read(uint2(clamp(local, int2(0), limit)), level).rgb;
+  float3 b = img.read(uint2(clamp(local + int2(1, 0), int2(0), limit)), level).rgb;
+  float3 c = img.read(uint2(clamp(local + int2(0, 1), int2(0), limit)), level).rgb;
+  float3 d = img.read(uint2(clamp(local + int2(1, 1), int2(0), limit)), level).rgb;
+  return mix(mix(a, b, weight.x), mix(c, d, weight.x), weight.y);
+}
+
+static float3 sharpAt(texture2d<float> img, float2 uv, float2 imgSize, int2 origin, uint level) {
+  float2 offset = 1.0 / imgSize, mipSize = max(floor(imgSize * 0.5), 1.0);
+  return 0.25 * (sharpSample(img, uv + offset, mipSize, origin, level)
+    + sharpSample(img, uv + float2(-offset.x, offset.y), mipSize, origin, level)
+    + sharpSample(img, uv + float2(offset.x, -offset.y), mipSize, origin, level)
+    + sharpSample(img, uv - offset, mipSize, origin, level));
 }
 
 static uint pcg(uint v) {
@@ -188,13 +226,17 @@ fragment float4 fmain(VOut in [[stage_in]],
                       texture2d<float> mk0 [[texture(4)]],
                       texture2d<float> mk1 [[texture(5)]],
                       texture2d<float> mk2 [[texture(6)]],
-                      texture2d<float> mk3 [[texture(7)]]) {
+                      texture2d<float> mk3 [[texture(7)]],
+                      texture2d<float> blurImage [[texture(8)]],
+                      texture2d<float> sharpImage [[texture(9)]]) {
   constexpr sampler s(filter::linear, mip_filter::linear, address::clamp_to_edge);
   constexpr sampler ls(filter::linear, address::clamp_to_edge);
   constexpr sampler rs(filter::linear, s_address::repeat, t_address::clamp_to_edge);
 
   float2 uv = u.region.xy + in.uv * u.region.zw;
-  float3 c = img.sample(s, uv).rgb;
+  bool tiled = u.p6.w > 0.5;
+  float2 inputUV = tiled ? (uv - u.inputRegion.xy) / u.inputRegion.zw : uv;
+  float3 c = tiled ? img.sample(s, inputUV, level(0.0)).rgb : img.sample(s, uv).rgb;
   if (u.p5.z > 0.5) return float4(c, 1);
   float2 p = uv;
   float2 imgSize = u.p7.xy;
@@ -204,8 +246,14 @@ fragment float4 fmain(VOut in [[stage_in]],
 
   // 0. 低频信息（清晰度、锐化用），取自原图
   float yIn = dot(c, LUMA);
-  float yBlur = clarity != 0.0 ? dot(blurAt(img, s, uv, lod, imgSize), LUMA) : 0.0;
-  float ySharp = sharpen > 0.0 ? dot(blurAt(img, s, uv, viewLod + 1.0, imgSize), LUMA) : yIn;
+  float3 low = float3(0), sharp = c;
+  if (clarity != 0.0) low = tiled ? blurAt(blurImage, s, uv, lod, imgSize, u.p7.z) : blurAt(img, s, uv, lod, imgSize);
+  if (sharpen > 0.0) {
+    if (tiled) sharp = sharpAt(sharpImage, uv, imgSize, int2(round(u.sharpRegion.xy * max(floor(imgSize * 0.5), 1.0))), 0);
+    else if (viewLod == 0.0) sharp = sharpAt(img, uv, imgSize, int2(0), min(1u, img.get_num_mip_levels() - 1));
+    else sharp = blurAt(img, s, uv, viewLod + 1.0, imgSize);
+  }
+  float yBlur = dot(low, LUMA), ySharp = dot(sharp, LUMA);
 
   // 1. 白平衡（Bradford）+ 曝光，线性光；不截断，超出的高光留给第 2 步恢复
   float3 l0 = toLin(c);
@@ -213,7 +261,7 @@ fragment float4 fmain(VOut in [[stage_in]],
 
   // 1b. 去雾：局部暗通道估计雾浓度（负值加一层雾）
   if (dehaze > 0.0) {
-    float3 hz = toLin(blurAt(img, s, uv, lod + 1.0, imgSize));
+    float3 hz = toLin(tiled ? blurAt(blurImage, s, uv, lod + 1.0, imgSize, u.p7.z) : blurAt(img, s, uv, lod + 1.0, imgSize));
     float veil = clamp(min(hz.r, min(hz.g, hz.b)) * dehaze * 0.9, 0.0, 0.9);
     lin = max(lin - veil, 0.0) / (1.0 - veil);
   } else if (dehaze < 0.0) {
