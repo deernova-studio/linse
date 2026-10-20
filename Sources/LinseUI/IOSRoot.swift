@@ -11,6 +11,10 @@ public struct IOSRootView: View {
     @ObservedObject var state: AppState
     @Environment(\.horizontalSizeClass) private var hSize
     @State private var pick: PhotosPickerItem?
+    @State private var photoSlot: AppState.SlotKind?
+    @State private var fileSlot: AppState.SlotKind?
+    @State private var choosingPhoto = false
+    @State private var choosingImageFile = false
     @State private var tab = 0
     @State private var share: TemporaryExportFile?
 
@@ -23,16 +27,20 @@ public struct IOSRootView: View {
                     SidebarView(state: state).frame(width: 300)
                     Divider()
                     VStack(spacing: 0) { actions.padding(12); Divider(); stage }
-                    Divider()
-                    PanelView(state: state).frame(width: 340)
+                    if state.source != nil {
+                        Divider()
+                        PanelView(state: state).frame(width: 340)
+                    }
                 }
             } else {
                 VStack(spacing: 0) {
                     stage.frame(maxHeight: .infinity)
                     Divider()
                     slots.padding(.horizontal, 14).padding(.vertical, 10)
-                    Divider()
-                    bottom.frame(height: 330)
+                    if state.source != nil {
+                        Divider()
+                        bottom.frame(height: 330)
+                    }
                 }
             }
         }
@@ -46,26 +54,32 @@ public struct IOSRootView: View {
         }
         .animation(.easeOut(duration: 0.15), value: state.toast)
         .preferredColorScheme(state.colorScheme)
-        .photosPicker(isPresented: Binding(get: { state.pickRequest != nil }, set: { if !$0 { state.pickRequest = nil } }),
+        .confirmationDialog("导入图片", isPresented: Binding(get: { state.importChoice != nil }, set: { if !$0 { state.importChoice = nil } }),
+                            titleVisibility: .visible, presenting: state.importChoice) { kind in
+            Button("从相册选择") { photoSlot = kind; choosingPhoto = true }
+            Button("从文件选择（含 RAW）") { fileSlot = kind; choosingImageFile = true }
+            Button("取消", role: .cancel) { }
+        }
+        .photosPicker(isPresented: $choosingPhoto,
                       selection: $pick, matching: .images, preferredItemEncoding: .current)
-        .onChange(of: pick) { item in
-            guard let item, let kind = state.pickRequest ?? Optional(.source) else { return }
-            state.pickRequest = nil
-            pick = nil
-            Task {
-                if let data = try? await item.loadTransferable(type: Data.self) {
-                    state.load(data: data, name: kind == .source ? "照片" : "目标风格", into: kind)
-                } else {
-                    state.flash("读不到这张照片")
-                }
+        .task(id: pick) { await importSelectedPhoto() }
+        .fileImporter(isPresented: $choosingImageFile, allowedContentTypes: [.image, .rawImage]) { result in
+            guard let kind = fileSlot else { return }
+            fileSlot = nil
+            switch result {
+            case .success(let url): Task { await state.load(url, into: kind) }
+            case .failure(let error):
+                if (error as NSError).code != NSUserCancelledError { state.reportImageImportError(error.localizedDescription) }
             }
         }
         .fileImporter(isPresented: $state.showLUTImporter, allowedContentTypes: [UTType(filenameExtension: "cube") ?? .data], allowsMultipleSelection: true) { r in
             if case .success(let urls) = r { state.importLUTs(urls) }
         }
         .sheet(isPresented: $state.showAISettings) { NavigationStack { ScrollView { AISettingsView(state: state).frame(maxWidth: .infinity) } } }
+        .sheet(item: $state.inspectedSlot) { ImageInspectionView(state: state, kind: $0) }
+        .modifier(ImageImportAlert(state: state))
         .sheet(item: $share) { ShareSheet(file: $0).ignoresSafeArea() }
-        .task { state.devAutoload() }
+        .task { await state.devAutoload() }
     }
 
     var topBar: some View {
@@ -116,9 +130,9 @@ public struct IOSRootView: View {
 
     var slots: some View {
         HStack(spacing: 12) {
-            MiniSlot(title: "原图", slot: state.source) { state.open(.source) }
+            MiniSlot(title: "原图", slot: state.source) { state.inspectOrImport(.source) }
             Image(systemName: "arrow.left").font(.system(size: 11, weight: .light)).foregroundStyle(.secondary)
-            MiniSlot(title: "目标风格", slot: state.target) { state.open(.target) }
+            MiniSlot(title: "目标图", slot: state.target) { state.inspectOrImport(.target) }
             Spacer(minLength: 4)
             actions
         }
@@ -126,14 +140,16 @@ public struct IOSRootView: View {
 
     var actions: some View {
         HStack(spacing: 8) {
-            Button { state.runMatch(useAI: true) } label: { Image(systemName: "sparkles").frame(width: 22, height: 22) }
+            Button { state.runMatch(useAI: true) } label: {
+                Label("AI 辅助匹配", systemImage: "sparkles").labelStyle(.iconOnly).frame(width: 22, height: 22)
+            }
                 .buttonStyle(.bordered)
                 .disabled(state.source == nil || state.target == nil || state.busy != nil)
             Button { state.runMatch() } label: { Text("匹配").font(.system(size: 14, weight: .medium)).padding(.horizontal, 6) }
-                .buttonStyle(.borderedProminent).tint(.primary)
-                .foregroundStyle(Color.appBackground)
+                .buttonStyle(.bordered)
                 .disabled(state.source == nil || state.target == nil || state.busy != nil)
         }
+        .tint(.primary)
     }
 
     var bottom: some View {
@@ -151,6 +167,19 @@ public struct IOSRootView: View {
             case 1: ScrollView { PresetsView(state: state, columns: 3).padding(14) }
             default: ScrollView { ChangesList(state: state).padding(14) }
             }
+        }
+    }
+
+    private func importSelectedPhoto() async {
+        guard let item = pick, let kind = photoSlot else { return }
+        defer { if pick == item { pick = nil; photoSlot = nil } }
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self) else { throw ImageImportError.unreadableFile }
+            try Task.checkCancellation()
+            let hint = item.supportedContentTypes.first(where: { $0.conforms(to: .rawImage) })?.identifier
+            await state.load(data: data, name: kind.title, into: kind, typeIdentifierHint: hint)
+        } catch {
+            if !Task.isCancelled { state.reportImageImportError("读不到这张照片。请确认已从 iCloud 下载，或尝试从文件导入原始图片。") }
         }
     }
 
@@ -215,14 +244,14 @@ struct ShareSheet: UIViewControllerRepresentable {
     func updateUIViewController(_ c: UIActivityViewController, context: Context) {}
 }
 
-/// 手机上的小图槽：点一下从相册选
+/// 手机上的小图槽：空槽导入，已有图片时先预览。
 struct MiniSlot: View {
     let title: String
     let slot: Slot?
     let action: () -> Void
     var body: some View {
-        Button(action: action) {
-            VStack(spacing: 4) {
+        VStack(spacing: 4) {
+            Button(action: action) {
                 ZStack {
                     Rectangle().fill(Color.primary.opacity(0.05))
                     if let t = slot?.thumb { Image(cg: t).resizable().scaledToFill() }
@@ -230,15 +259,20 @@ struct MiniSlot: View {
                 }
                 .frame(width: 52, height: 52).clipped()
                 .overlay(Rectangle().stroke(Color.primary.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: slot == nil ? [3, 3] : [])))
-                Text(title).font(.system(size: 10)).foregroundStyle(.secondary)
             }
+            .buttonStyle(NeutralButtonStyle(cornerRadius: 0, outlined: true))
+            .accessibilityLabel(slot == nil ? "导入\(title)" : "查看\(title)")
+            Text(title).font(.system(size: 10)).foregroundStyle(.secondary)
+                .accessibilityHidden(true)
         }
-        .buttonStyle(.plain)
     }
 }
 
 extension AppState {
-    func open(_ kind: SlotKind) { pickRequest = kind }
+    func open(_ kind: SlotKind) {
+        guard busy == nil else { return flash("正在处理，请稍候") }
+        importChoice = kind
+    }
     func importLUT() { showLUTImporter = true }
 }
 #endif

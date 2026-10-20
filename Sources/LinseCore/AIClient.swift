@@ -1,24 +1,34 @@
 // AI 辅助：调用视觉模型看图给初值。支持两种接口协议：Anthropic（Messages API）和 OpenAI 兼容（/chat/completions）。
-// Swift 没有官方 SDK，这里直接发 HTTP 请求；请求格式和 Electron 版 ai.ts 一致。API Key 存在钥匙串里。
+// 直接发 HTTP 请求；macOS 的 API Key 保存在本地配置，iOS 仍使用钥匙串。
 import Foundation
 import Security
 
-public enum AIProtocol: String, Codable, CaseIterable, Sendable { case anthropic, openai }
+public enum AIProtocol: String, Codable, CaseIterable, Sendable {
+    case openai, anthropic
+
+    public var defaultModel: String {
+        switch self {
+        case .openai: "gpt-5.5"
+        case .anthropic: "claude-opus-5-5"
+        }
+    }
+}
 public enum AIEffort: String, Codable, CaseIterable, Sendable { case auto = "", low, medium, high, xhigh, max }
 
 public struct AISettings: Codable, Equatable, Sendable {
-    public var proto: AIProtocol = .anthropic
+    public var proto: AIProtocol = .openai
     public var baseUrl = ""
-    public var model = "claude-opus-5-5"
+    public var model = AIProtocol.openai.defaultModel
     public var effort: AIEffort = .auto
     public var fast = false
     public init() {}
     enum CodingKeys: String, CodingKey { case proto = "protocol", baseUrl, model, effort, fast }
     public init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
-        proto = (try? c.decode(AIProtocol.self, forKey: .proto)) ?? .anthropic
+        proto = (try? c.decode(AIProtocol.self, forKey: .proto)) ?? .openai
         baseUrl = (try? c.decode(String.self, forKey: .baseUrl)) ?? ""
-        model = ((try? c.decode(String.self, forKey: .model)) ?? "").isEmpty ? "claude-opus-5-5" : try c.decode(String.self, forKey: .model)
+        let savedModel = (try? c.decode(String.self, forKey: .model)) ?? ""
+        model = savedModel.isEmpty ? proto.defaultModel : savedModel
         effort = (try? c.decode(AIEffort.self, forKey: .effort)) ?? .auto
         fast = (try? c.decode(Bool.self, forKey: .fast)) ?? false
     }
@@ -28,9 +38,17 @@ public struct AIError: LocalizedError, Sendable {
     public let message: String, status: Int?
     public init(_ m: String, status: Int? = nil) { message = m; self.status = status }
     public var errorDescription: String? { message }
+
+    /// 只有明确拒绝某个可选参数时才做兼容重试，网关故障不应触发重复调用。
+    func rejectsParameter(_ names: [String]) -> Bool {
+        guard status == 400 || status == 422 else { return false }
+        let text = message.lowercased()
+        return names.contains(where: { text.contains($0) }) &&
+            ["unsupported", "not supported", "unrecognized", "unknown", "unexpected", "not permitted", "not allowed", "不支持"].contains(where: { text.contains($0) })
+    }
 }
 
-/// 钥匙串里的 API Key
+/// iOS 使用的 API Key 存储；macOS 使用 LocalAIConfigurationStore。
 public enum AIKeychain {
     static let service = "app.linse.ai", account = "api-key"
     static var query: [String: Any] { [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account] }
@@ -158,13 +176,28 @@ public enum AIClient {
         return "\(prompt)\n\n实测统计（JSON，source=原图，target=目标图）：\n\(t)"
     }
 
-    static func send(_ req: URLRequest) async throws -> [String: Any] {
-        let (data, resp) = try await URLSession.shared.data(for: req)
+    static func send(_ req: URLRequest, session: URLSession) async throws -> [String: Any] {
+        let (data, resp) = try await session.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
         guard (200..<300).contains(code) else {
             var msg = String(data: data.prefix(600), encoding: .utf8) ?? ""
-            if let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let e = j["error"] as? [String: Any], let m = e["message"] as? String { msg = m }
-            throw AIError("接口返回 \(code)：\(msg.prefix(300))", status: code)
+            if let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                msg = (j["error"] as? [String: Any])?["message"] as? String ?? j["error"] as? String ?? j["message"] as? String ?? msg
+            }
+            let summary: String
+            switch code {
+            case 502, 503, 504:
+                summary = "服务或上游模型暂时不可用（HTTP \(code)）。请稍后重试；持续失败时，请向服务商确认该模型和接口是否可用。"
+            case 401, 403:
+                summary = "接口拒绝访问（HTTP \(code)）。请检查 API Key 和模型使用权限。"
+            case 429:
+                summary = "请求受限或额度不足（HTTP 429）。请稍后重试，或检查服务商的账户额度。"
+            default:
+                summary = "接口返回 HTTP \(code)。"
+            }
+            let host = req.url?.host.map { "\n服务：\($0)" } ?? ""
+            let detail = msg.isEmpty ? "" : "\n详情：\(msg.prefix(300))"
+            throw AIError(summary + host + detail, status: code)
         }
         guard let j = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { throw AIError("接口返回的不是 JSON") }
         return j
@@ -193,7 +226,7 @@ public enum AIClient {
         ["claude-opus-5", "claude-fable-5", "claude-sonnet-5-5"].contains { model.hasPrefix($0) }
     }
 
-    static func callAnthropic(_ s: AISettings, key: String, imgs: AIImages?, prompt: String, maxTokens: Int, structured: Bool) async throws -> String {
+    static func callAnthropic(_ s: AISettings, key: String, imgs: AIImages?, prompt: String, maxTokens: Int, structured: Bool, session: URLSession) async throws -> String {
         var content: [[String: Any]] = []
         if let imgs {
             content += [
@@ -220,12 +253,12 @@ public enum AIClient {
             body["fallbacks"] = "default"
         }
         let req = try request(anthropicBase(s.baseUrl) + "/v1/messages", key: key, timeout: imgs != nil ? 180 : 30, headers: anthropicHeaders(key, betas: betas), body: body)
-        let j = try await send(req)
+        let j = try await send(req, session: session)
         if j["stop_reason"] as? String == "refusal" { throw AIError("模型拒绝了这次请求") }
         return ((j["content"] as? [[String: Any]]) ?? []).filter { $0["type"] as? String == "text" }.compactMap { $0["text"] as? String }.joined()
     }
 
-    static func callOpenAI(_ s: AISettings, key: String, imgs: AIImages?, prompt: String, maxTokens: Int, structured: Bool) async throws -> String {
+    static func callOpenAI(_ s: AISettings, key: String, imgs: AIImages?, prompt: String, maxTokens: Int, structured: Bool, session: URLSession) async throws -> String {
         var user: [[String: Any]] = []
         if let imgs {
             user += [
@@ -239,28 +272,48 @@ public enum AIClient {
         var messages: [[String: Any]] = []
         if imgs != nil { messages.append(["role": "system", "content": system]) }
         messages.append(["role": "user", "content": user])
-        var body: [String: Any] = ["model": s.model, "max_tokens": maxTokens, "messages": messages]
+        var body: [String: Any] = ["model": s.model, "max_completion_tokens": maxTokens, "messages": messages]
         if s.effort != .auto { body["reasoning_effort"] = s.effort.rawValue }
+        if s.fast { body["service_tier"] = "priority" }
         if imgs != nil, structured {
             body["response_format"] = ["type": "json_schema", "json_schema": ["name": "camera_raw_settings", "schema": schema, "strict": false]]
         }
-        let req = try request(openaiBase(s.baseUrl) + "/chat/completions", key: key, timeout: imgs != nil ? 180 : 30,
-                              headers: ["Authorization": "Bearer \(key)"], body: body)
-        let j = try await send(req)
-        let msg = ((j["choices"] as? [[String: Any]])?.first?["message"] as? [String: Any])?["content"] as? String
-        return msg ?? ""
+        func submit(_ body: [String: Any]) async throws -> [String: Any] {
+            let req = try request(openaiBase(s.baseUrl) + "/chat/completions", key: key, timeout: imgs != nil ? 180 : 30,
+                                  headers: ["Authorization": "Bearer \(key)"], body: body)
+            return try await send(req, session: session)
+        }
+        let j: [String: Any]
+        do {
+            j = try await submit(body)
+        } catch let error as AIError where error.rejectsParameter(["max_completion_tokens"]) {
+            // 少数旧网关仅接受 max_tokens；只在服务端明确拒绝新字段时回退一次。
+            try Task.checkCancellation()
+            body.removeValue(forKey: "max_completion_tokens")
+            body["max_tokens"] = maxTokens
+            j = try await submit(body)
+        }
+        guard let choice = (j["choices"] as? [[String: Any]])?.first,
+              let message = choice["message"] as? [String: Any] else {
+            throw AIError("接口未返回聊天结果。请向服务商确认当前模型支持 Chat Completions 接口。")
+        }
+        if choice["finish_reason"] as? String == "length" {
+            throw AIError("模型已达到输出长度限制，未完成回复。请降低思考强度后重试。")
+        }
+        if let refusal = message["refusal"] as? String, !refusal.isEmpty { throw AIError("模型拒绝了这次请求。") }
+        return message["content"] as? String ?? ""
     }
 
-    static func call(_ s: AISettings, key: String, imgs: AIImages?, prompt: String, maxTokens: Int) async throws -> String {
+    static func call(_ s: AISettings, key: String, imgs: AIImages?, prompt: String, maxTokens: Int, session: URLSession) async throws -> String {
         guard !key.isEmpty else { throw AIError("还没有填写 API Key") }
         func go(_ structured: Bool) async throws -> String {
             s.proto == .openai
-                ? try await callOpenAI(s, key: key, imgs: imgs, prompt: prompt, maxTokens: maxTokens, structured: structured)
-                : try await callAnthropic(s, key: key, imgs: imgs, prompt: prompt, maxTokens: maxTokens, structured: structured)
+                ? try await callOpenAI(s, key: key, imgs: imgs, prompt: prompt, maxTokens: maxTokens, structured: structured, session: session)
+                : try await callAnthropic(s, key: key, imgs: imgs, prompt: prompt, maxTokens: maxTokens, structured: structured, session: session)
         }
         do {
             return try await go(true)
-        } catch let e as AIError where imgs != nil && (e.status == 400 || e.status == 422) {
+        } catch let e as AIError where imgs != nil && e.rejectsParameter(["response_format", "json_schema", "output_config.format", "structured output"]) {
             // 部分网关或模型不支持结构化输出参数，去掉它再试一次，靠提示词约束格式
             try Task.checkCancellation()
             return try await go(false)
@@ -268,17 +321,17 @@ public enum AIClient {
     }
 
     /// 从接口动态获取可用模型列表
-    public static func listModels(_ s: AISettings, key: String) async throws -> [String] {
+    public static func listModels(_ s: AISettings, key: String, session: URLSession = .shared) async throws -> [String] {
         guard !key.isEmpty else { throw AIError("还没有填写 API Key") }
         if s.proto == .openai {
-            let j = try await send(try request(openaiBase(s.baseUrl) + "/models", key: key, timeout: 20, headers: ["Authorization": "Bearer \(key)"], body: nil))
+            let j = try await send(try request(openaiBase(s.baseUrl) + "/models", key: key, timeout: 20, headers: ["Authorization": "Bearer \(key)"], body: nil), session: session)
             return ((j["data"] as? [[String: Any]]) ?? []).compactMap { $0["id"] as? String }.filter { !$0.isEmpty }.sorted()
         }
         var ids: [String] = [], after: String?
         for _ in 0..<20 {
             var url = anthropicBase(s.baseUrl) + "/v1/models?limit=1000"
             if let after, let a = after.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) { url += "&after_id=\(a)" }
-            let j = try await send(try request(url, key: key, timeout: 20, headers: anthropicHeaders(key), body: nil))
+            let j = try await send(try request(url, key: key, timeout: 20, headers: anthropicHeaders(key), body: nil), session: session)
             ids += ((j["data"] as? [[String: Any]]) ?? []).compactMap { $0["id"] as? String }
             guard j["has_more"] as? Bool == true, let last = j["last_id"] as? String else { break }
             after = last
@@ -286,15 +339,16 @@ public enum AIClient {
         return ids
     }
 
-    public static func test(_ s: AISettings, key: String) async throws -> String {
-        let t = try await call(s, key: key, imgs: nil, prompt: "只回复两个字：连通", maxTokens: 1024)
+    public static func test(_ s: AISettings, key: String, session: URLSession = .shared) async throws -> String {
+        let t = try await call(s, key: key, imgs: nil, prompt: "只回复两个字：连通", maxTokens: 1024, session: session)
         let r = String(t.trimmingCharacters(in: .whitespacesAndNewlines).prefix(40))
-        return r.isEmpty ? "（空回复）" : r
+        guard !r.isEmpty else { throw AIError("接口已响应，但模型没有返回有效文字。请尝试降低思考强度，或向服务商确认模型是否可用。") }
+        return r
     }
 
     /// 看图分析；取消外层 Task 会中止网络请求
-    public static func analyze(_ s: AISettings, key: String, images: AIImages) async throws -> AIAnalysis {
-        let text = try await call(s, key: key, imgs: images, prompt: "请分析并按要求输出 JSON。", maxTokens: 16000)
+    public static func analyze(_ s: AISettings, key: String, images: AIImages, session: URLSession = .shared) async throws -> AIAnalysis {
+        let text = try await call(s, key: key, imgs: images, prompt: "请分析并按要求输出 JSON。", maxTokens: 16000, session: session)
         guard let a = text.firstIndex(of: "{"), let b = text.lastIndex(of: "}"), a < b,
               let j = try? JSONSerialization.jsonObject(with: Data(text[a...b].utf8)) as? [String: Any] else { throw AIError("模型没有返回 JSON") }
         return AIAnalysis(json: j)

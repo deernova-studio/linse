@@ -54,8 +54,10 @@ public struct MacRootView: View {
             SidebarView(state: state).frame(width: 272)
             Divider()
             StageView(state: state).frame(maxWidth: .infinity, maxHeight: .infinity)
-            Divider()
-            PanelView(state: state).frame(width: 320)
+            if state.source != nil {
+                Divider()
+                PanelView(state: state).frame(width: 320)
+            }
         }
         .background(Color.appBackground)
         .overlay(alignment: .bottom) {
@@ -74,35 +76,61 @@ public struct MacRootView: View {
                 }
             }
             ToolbarItem(placement: .principal) {
-                Picker("", selection: $state.viewMode) {
+                Picker("查看方式", selection: $state.viewMode) {
                     ForEach(ViewMode.allCases, id: \.self) { Text($0.rawValue) }
                 }
-                .pickerStyle(.segmented).frame(width: 180).disabled(state.source == nil)
+                .labelsHidden().pickerStyle(.segmented).frame(width: 180).disabled(state.source == nil)
             }
             ToolbarItemGroup(placement: .primaryAction) {
-                Button { state.cycleTheme() } label: { Image(systemName: state.theme.icon) }.help("外观：\(state.theme.label)")
-                Button { state.showAISettings = true } label: { Image(systemName: "gearshape") }.help("AI 设置")
-                Button { state.reset() } label: { Image(systemName: "arrow.counterclockwise") }.help("全部复位").disabled(state.source == nil)
+                Button("切换外观", systemImage: state.theme.icon) { state.cycleTheme() }
+                    .labelStyle(.iconOnly).buttonStyle(MacToolbarButtonStyle(iconOnly: true))
+                    .help("外观：\(state.theme.label)")
+                Button("AI 设置", systemImage: "gearshape") { state.showAISettings = true }
+                    .labelStyle(.iconOnly).buttonStyle(MacToolbarButtonStyle(iconOnly: true))
+                    .help("AI 设置")
+                Button("全部复位", systemImage: "arrow.counterclockwise") { state.reset() }
+                    .labelStyle(.iconOnly).buttonStyle(MacToolbarButtonStyle(iconOnly: true))
+                    .help(state.source == nil ? "先导入原图" : "全部复位")
+                    .disabled(state.source == nil || state.busy != nil)
                 Menu {
                     ForEach(ExportFormat.allCases, id: \.self) { f in Button(f.label) { state.saveImage(f) } }
                     Divider()
                     Button("3D LUT（.cube）") { state.saveLUT() }
                     Button("Lightroom 预设（.xmp）") { state.saveXMP() }
-                } label: { Text("导出") }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("导出")
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 9, weight: .semibold)).accessibilityHidden(true)
+                    }
+                }
+                .menuStyle(.button).buttonStyle(MacToolbarButtonStyle())
+                .menuIndicator(.hidden).fixedSize()
+                .help(state.source == nil ? "先导入原图" : state.busy != nil ? "正在处理，请稍候" : "导出照片、LUT 或预设")
                 .disabled(state.source == nil || state.busy != nil)
                 Button { state.runMatch(useAI: true) } label: { Label("AI 辅助匹配", systemImage: "sparkles").labelStyle(.titleAndIcon) }
-                    .help("先让视觉模型看图给出初值和判断，再用计算精确对齐")
+                    .buttonStyle(MacToolbarButtonStyle())
+                    .help(matchUnavailableReason ?? "先让视觉模型看图给出初值和判断，再用计算精确对齐")
                     .disabled(state.source == nil || state.target == nil || state.busy != nil)
-                Button { state.runMatch() } label: { Text("计算匹配").padding(.horizontal, 4) }
-                    .buttonStyle(.borderedProminent).tint(.primary)
-                    .help("纯计算：统计两张图的颜色并反推滑块，离线可用")
+                Button("计算匹配") { state.runMatch() }
+                    .buttonStyle(MacToolbarButtonStyle())
+                    .help(matchUnavailableReason ?? "纯计算：统计两张图的颜色并反推滑块，离线可用")
                     .disabled(state.source == nil || state.target == nil || state.busy != nil)
             }
         }
         .sheet(isPresented: $state.showAISettings) { AISettingsView(state: state) }
+        .sheet(item: $state.inspectedSlot) { ImageInspectionView(state: state, kind: $0) }
+        .modifier(ImageImportAlert(state: state))
         .onAppear { state.applyTheme() }
         .background(KeyPeek(state: state))
-        .task { state.devAutoload(); state.devSnapshot() }
+        .task { await state.devAutoload(); state.devSnapshot() }
+    }
+
+    private var matchUnavailableReason: String? {
+        if state.busy != nil { return "正在处理，请稍候" }
+        if state.source == nil { return state.target == nil ? "先导入原图和目标风格图" : "先导入原图" }
+        if state.target == nil { return "先导入目标风格图" }
+        return nil
     }
 }
 
@@ -111,7 +139,8 @@ struct KeyPeek: NSViewRepresentable {
     let state: AppState
     func makeNSView(context: Context) -> NSView {
         context.coordinator.monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp]) { e in
-            guard e.keyCode == 49, !(NSApp.keyWindow?.firstResponder is NSTextView) else { return e }
+            guard e.keyCode == 49, NSApp.keyWindow?.attachedSheet == nil, NSApp.keyWindow?.sheetParent == nil,
+                  !(NSApp.keyWindow?.firstResponder is NSTextView) else { return e }
             let down = e.type == .keyDown
             Task { @MainActor in if state.peekOriginal != down { state.peekOriginal = down } }
             return nil
@@ -125,11 +154,12 @@ struct KeyPeek: NSViewRepresentable {
 
 extension AppState {
     func open(_ kind: SlotKind) {
+        guard busy == nil else { return flash("正在处理，请稍候") }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.image, .rawImage]
         panel.allowsMultipleSelection = false
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        load(url, into: kind)
+        Task { await load(url, into: kind) }
     }
 
     func importLUT() {

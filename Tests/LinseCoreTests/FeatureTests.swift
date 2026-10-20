@@ -63,6 +63,8 @@ final class FeatureTests: XCTestCase {
     func testAIClientAgainstMock() async throws {
         guard let base = ProcessInfo.processInfo.environment["LINSE_MOCK_AI"] else { throw XCTSkip("没有模拟接口") }
         var s = AISettings()
+        s.proto = .anthropic
+        s.model = s.proto.defaultModel
         s.baseUrl = base
         s.effort = .high
         let models = try await AIClient.listModels(s, key: "k")

@@ -3,13 +3,6 @@ import LinseCore
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct Slot {
-    let name: String
-    let ci: CIImage
-    let size: CGSize
-    let thumb: CGImage?
-}
-
 enum ViewMode: String, CaseIterable { case result = "结果", split = "对比", original = "原图" }
 
 enum ExportRequestError: LocalizedError {
@@ -44,7 +37,9 @@ public final class AppState: ObservableObject {
     private let exports: ExportService
     private var exportID: UUID?
     private let matches: MatchService
-    private let aiKeyProvider: () -> String
+    private let aiKeyProvider: (() -> String)?
+    let aiConfigurationStore: LocalAIConfigurationStore
+    var savedAIKey = ""
     private var matchID: UUID?
     let maskService: SmartMaskService
     var maskTask: Task<Void, Never>?
@@ -56,6 +51,11 @@ public final class AppState: ObservableObject {
     @Published var summary: Summary?
     @Published var source: Slot?
     @Published var target: Slot?
+    @Published var inspectedSlot: SlotKind?
+    let imagePreviews = ImagePreviewService()
+    let imageImports = ImageImportService()
+    @Published var imageImportError: String?
+    @Published var importChoice: SlotKind?
     @Published var viewMode: ViewMode = .result
     @Published var split: CGFloat = 0.5
     @Published var peekOriginal = false
@@ -71,7 +71,6 @@ public final class AppState: ObservableObject {
     @Published var aiSettings = AISettings()
     @Published var aiHasKey = false
     @Published var showAISettings = false
-    @Published var pickRequest: SlotKind?      // iOS：请求打开相册选图
     @Published var showLUTImporter = false     // iOS：请求打开"文件"选 .cube
     @Published var theme: ThemeMode = .auto { didSet { applyTheme() } }
     var aiTask: Task<Void, Never>?
@@ -86,9 +85,18 @@ public final class AppState: ObservableObject {
     private var undoTimer: Task<Void, Never>?
 
     public convenience init() {
+        #if os(macOS)
+        let configurationStore = LocalAIConfigurationStore(
+            url: FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".linse", isDirectory: true).appendingPathComponent("config.json"),
+            legacySettingsURL: Self.dataDir.appendingPathComponent("ai-settings.json"))
+        #else
+        let configurationStore: LocalAIConfigurationStore? = nil
+        #endif
         self.init(luts: LutStore(dir: Self.dataDir.appendingPathComponent("luts", isDirectory: true)),
                   theme: ThemeMode(rawValue: UserDefaults.standard.string(forKey: "theme") ?? "") ?? .auto,
-                  presetStore: PresetStore(url: Self.dataDir.appendingPathComponent("presets.json")))
+                  presetStore: PresetStore(url: Self.dataDir.appendingPathComponent("presets.json")),
+                  aiConfigurationStore: configurationStore)
         loadPresets()
         loadAISettings()
     }
@@ -96,7 +104,7 @@ public final class AppState: ObservableObject {
     /// 注入资源库，方便测试编辑流程而不读取用户设置或钥匙串。
     init(luts: LutStore, theme: ThemeMode = .auto, presetStore: PresetStore? = nil, matchService: MatchService? = nil,
          maskService: SmartMaskService? = nil,
-         aiKeyProvider: @escaping () -> String = { ProcessInfo.processInfo.environment["LINSE_AI_KEY"] ?? AIKeychain.load() }) {
+         aiKeyProvider: (() -> String)? = nil, aiConfigurationStore: LocalAIConfigurationStore? = nil) {
         do {
             display = try Renderer()
             proxy = try Renderer(device: display.device)
@@ -109,6 +117,7 @@ public final class AppState: ObservableObject {
         self.luts = luts
         self.presetStore = presetStore ?? PresetStore(url: luts.dir.appendingPathComponent("presets.json"))
         self.aiKeyProvider = aiKeyProvider
+        self.aiConfigurationStore = aiConfigurationStore ?? LocalAIConfigurationStore(url: luts.dir.appendingPathComponent("config.json"))
         display.luts = luts
         proxy.luts = luts
         display.maskBitmaps = smartMasks
@@ -118,6 +127,16 @@ public final class AppState: ObservableObject {
     }
 
     var effectiveView: ViewMode { peekOriginal ? .original : viewMode }
+
+    func aiKey() -> String {
+        if let aiKeyProvider { return aiKeyProvider() }
+        if let key = ProcessInfo.processInfo.environment["LINSE_AI_KEY"] { return key }
+        #if os(macOS)
+        return savedAIKey
+        #else
+        return AIKeychain.load()
+        #endif
+    }
 
     /// 画布四周留白（点）；手机屏幕小，留得少一些
     var canvasInset: CGFloat {
@@ -215,40 +234,73 @@ public final class AppState: ObservableObject {
 
     // MARK: 载入
 
-    enum SlotKind { case source, target }
+    enum SlotKind: String, Identifiable {
+        case source, target
+        var id: Self { self }
+        var title: String { self == .source ? "原图" : "目标图" }
+    }
 
-    func load(_ url: URL, into kind: SlotKind) {
-        guard busy == nil else { return flash("正在处理，请稍候") }
-        // 从"文件"App 或拖进来的文件可能需要临时访问授权
-        let scoped = url.startAccessingSecurityScopedResource()
-        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-        // Core Image 负责解码：JPEG、PNG、HEIC、TIFF、相机 RAW 都走这里，并按 EXIF 方向摆正
-        guard let ci = CIImage(contentsOf: url, options: [.applyOrientationProperty: true]) else {
-            return flash("打不开这张图：\(url.lastPathComponent)")
-        }
-        load(ci, name: url.lastPathComponent, into: kind)
+    func slot(for kind: SlotKind) -> Slot? { kind == .source ? source : target }
+
+    func inspectOrImport(_ kind: SlotKind) {
+        if slot(for: kind) != nil { inspectedSlot = kind }
+        else { open(kind) }
+    }
+
+    @discardableResult
+    func load(_ url: URL, into kind: SlotKind) async -> Bool {
+        await importImage(name: url.lastPathComponent, into: kind) { try await self.imageImports.load(url) }
     }
 
     /// 相册里选的图是一段数据
-    func load(data: Data, name: String, into kind: SlotKind) {
-        guard busy == nil else { return flash("正在处理，请稍候") }
-        guard let ci = CIImage(data: data, options: [.applyOrientationProperty: true]) else { return flash("打不开这张图") }
-        load(ci, name: name, into: kind)
+    @discardableResult
+    func load(data: Data, name: String, into kind: SlotKind, typeIdentifierHint: String? = nil) async -> Bool {
+        await importImage(name: name, into: kind) { try await self.imageImports.load(data: data, name: name, typeIdentifierHint: typeIdentifierHint) }
     }
 
-    func load(_ ci: CIImage, name: String, into kind: SlotKind) {
+    private func importImage(name: String, into kind: SlotKind, decode: () async throws -> ImportedImage) async -> Bool {
+        guard busy == nil else { flash("正在处理，请稍候"); return false }
+        busy = "正在导入\(kind.title)…"
+        imageImportError = nil
+        defer { busy = nil }
+        do {
+            let imported = try await decode()
+            try Task.checkCancellation()
+            return load(imported.image, name: name, into: kind, metadata: imported.metadata, thumbnail: imported.thumbnail)
+        } catch is CancellationError { return false }
+        catch {
+            reportImageImportError(error.localizedDescription)
+            return false
+        }
+    }
+
+    func reportImageImportError(_ message: String) {
+        flash(message)
+        if inspectedSlot == nil { imageImportError = message }
+    }
+
+    @discardableResult
+    func load(_ ci: CIImage, name: String, into kind: SlotKind, metadata: ImageMetadata = ImageMetadata(), thumbnail: CGImage? = nil) -> Bool {
         // 原点挪到 (0,0)，后面的缩放和识别都按这个算
         let ci = ci.transformed(by: CGAffineTransform(translationX: -ci.extent.minX, y: -ci.extent.minY))
         let ext = ci.extent
+        guard !ext.isEmpty, !ext.isInfinite, ext.width.isFinite, ext.height.isFinite,
+              ext.width < CGFloat(Int.max), ext.height < CGFloat(Int.max) else {
+            reportImageImportError(ImageImportError.invalidImage.localizedDescription)
+            return false
+        }
         let thumbCI = ci.transformed(by: CGAffineTransform(scaleX: 400 / max(ext.width, ext.height), y: 400 / max(ext.width, ext.height)))
-        let thumb = display.ciContext.createCGImage(thumbCI, from: thumbCI.extent)
-        let slot = Slot(name: name, ci: ci, size: ext.size, thumb: thumb)
+        guard let thumb = thumbnail ?? display.ciContext.createCGImage(thumbCI, from: thumbCI.extent) else {
+            reportImageImportError(ImageImportError.invalidImage.localizedDescription)
+            return false
+        }
+        let slot = Slot(name: name, ci: ci, size: ext.size, thumb: thumb, metadata: metadata)
         switch kind {
         case .source:
             do {
                 try display.setImage(ci: ci, maxSide: display.maxTextureSize)
                 try proxy.setImage(ci: ci, maxSide: 320)
-            } catch { return flash(error.localizedDescription) }
+            } catch { reportImageImportError(error.localizedDescription); return false }
             invalidateMaskDetection()
             source = slot
             thumbnails = [:]
@@ -261,6 +313,7 @@ public final class AppState: ObservableObject {
         }
         history.invalidateMatchSummaries()
         if summary != nil, summary?.source.hasPrefix("预设") == false { summary?.stale = true }
+        return true
     }
 
     // MARK: 匹配
@@ -273,7 +326,7 @@ public final class AppState: ObservableObject {
             showAISettings = true
             return flash("先填写 API Key")
         }
-        let ai = aiSettings, key = useAI ? aiKeyProvider() : ""
+        let ai = aiSettings, key = useAI ? aiKey() : ""
         let id = UUID()
         matchID = id
         busy = useAI ? "AI（\(ai.model)\(ai.effort == .auto ? "" : " · 思考强度 \(ai.effort.rawValue)")\(ai.fast ? " · 快速" : "")）正在看图…" : "分析目标照片…"
@@ -451,10 +504,10 @@ public final class AppState: ObservableObject {
     func xmpText(name: String) -> String { XMP.make(params, name: name) }
 
     /// 开发自测：LINSE_SOURCE / LINSE_TARGET 指定启动时载入的图，LINSE_MATCH=1 顺便跑一次匹配，LINSE_VIEW 设查看模式
-    func devAutoload() {
+    func devAutoload() async {
         let env = ProcessInfo.processInfo.environment
-        if let s = env["LINSE_SOURCE"] { load(URL(fileURLWithPath: s), into: .source) }
-        if let t = env["LINSE_TARGET"] { load(URL(fileURLWithPath: t), into: .target) }
+        if let s = env["LINSE_SOURCE"] { await load(URL(fileURLWithPath: s), into: .source) }
+        if let t = env["LINSE_TARGET"] { await load(URL(fileURLWithPath: t), into: .target) }
         if let t = env["LINSE_APPEARANCE"], let m = ThemeMode(rawValue: t) { theme = m }
         if let v = env["LINSE_VIEW"], let m = ViewMode(rawValue: v) { viewMode = m }
         if let k = env["LINSE_AI_KEY"], !k.isEmpty { aiHasKey = true }

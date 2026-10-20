@@ -156,12 +156,7 @@ struct StageView: View {
         }
         .onDrop(of: [.fileURL], isTargeted: $dropTarget) { providers in
             let kinds: [AppState.SlotKind] = providers.count >= 2 ? [.source, .target] : [state.source != nil && state.target == nil ? .target : .source]
-            for (p, k) in zip(providers, kinds) {
-                _ = p.loadObject(ofClass: URL.self) { url, _ in
-                    if let url { Task { @MainActor in state.load(url, into: k) } }
-                }
-            }
-            return true
+            return state.importDroppedImages(providers, into: kinds)
         }
     }
 }
@@ -242,7 +237,7 @@ struct EmptyGuide: View {
             .padding(24)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(NeutralButtonStyle(cornerRadius: 0))
         .help("\(title)（\(key)）")
     }
 }

@@ -8,10 +8,12 @@ struct SidebarView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                SlotView(title: "原图", slot: state.source) { state.open(.source) }
+            HStack(alignment: .top, spacing: 10) {
+                SlotView(title: "原图", slot: state.source) { state.inspectOrImport(.source) }
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                     .onDrop(of: [.fileURL], isTargeted: nil) { drop($0, .source) }
-                SlotView(title: "目标风格", slot: state.target) { state.open(.target) }
+                SlotView(title: "目标图", slot: state.target) { state.inspectOrImport(.target) }
+                    .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
                     .onDrop(of: [.fileURL], isTargeted: nil) { drop($0, .target) }
             }
             .padding(14)
@@ -30,9 +32,7 @@ struct SidebarView: View {
     }
 
     func drop(_ providers: [NSItemProvider], _ k: AppState.SlotKind) -> Bool {
-        guard let p = providers.first else { return false }
-        _ = p.loadObject(ofClass: URL.self) { url, _ in if let url { Task { @MainActor in state.load(url, into: k) } } }
-        return true
+        state.importDroppedImages(providers, into: [k])
     }
 
 }
@@ -41,27 +41,28 @@ struct SlotView: View {
     let title: String
     let slot: Slot?
     let action: () -> Void
-    @State private var hover = false
 
     var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 6) {
-                ZStack {
-                    Rectangle().fill(Color.primary.opacity(0.04))
-                    if let t = slot?.thumb { Image(cg: t).resizable().scaledToFill() }
-                    else { Image(systemName: "plus").font(.system(size: 14, weight: .light)).foregroundStyle(.secondary) }
-                }
-                .frame(height: 84).clipped()
-                .overlay(Rectangle().stroke(Color.primary.opacity(hover ? 0.4 : 0.14), style: StrokeStyle(lineWidth: 1, dash: slot == nil ? [3, 3] : [])))
-                Text(title).font(AppTypography.sectionTitle).foregroundStyle(.primary)
-                Text(slot.map { "\(Int($0.size.width))×\(Int($0.size.height))" } ?? "点击或拖入")
-                    .font(AppTypography.metadata).monospacedDigit().foregroundStyle(.secondary).lineLimit(1)
+        VStack(alignment: .leading, spacing: 6) {
+            Button(action: action) {
+                Rectangle().fill(Color.primary.opacity(0.04))
+                    .frame(height: 84)
+                    // 图片只填充已分配的槽位，不能用自身宽高比撑大侧栏。
+                    .overlay {
+                        if let t = slot?.thumb { Image(cg: t).resizable().scaledToFill() }
+                        else { Image(systemName: "plus").font(.body).foregroundStyle(.secondary) }
+                    }
+                    .clipped()
+                    .overlay(Rectangle().stroke(Color.primary.opacity(0.14), style: StrokeStyle(lineWidth: 1, dash: slot == nil ? [3, 3] : [])))
             }
-            .contentShape(Rectangle())
+            .buttonStyle(NeutralButtonStyle(cornerRadius: 0, outlined: true))
+            .accessibilityLabel(slot == nil ? "导入\(title)" : "查看\(title)")
+            .help(slot.map { "查看\(title)：\($0.name)" } ?? "导入\(title)")
+            Text(title).font(AppTypography.sectionTitle).foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityHidden(true)
         }
-        .buttonStyle(.plain)
-        .onHover { hover = $0 }
-        .help(slot?.name ?? "导入\(title)")
+        .frame(minWidth: 0, maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -156,7 +157,7 @@ struct AINotes: View {
                     }
                     .foregroundStyle(.secondary)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(NeutralButtonStyle())
             }
             if open {
                 ForEach(Array(ai.reasons.enumerated()), id: \.offset) { _, r in
@@ -189,13 +190,13 @@ struct PresetsView: View {
                 HStack {
                     TextField("预设名称", text: $newName).textFieldStyle(.plain).font(.system(size: 12))
                         .onSubmit { save() }
-                    Button("存") { save() }.buttonStyle(.plain).font(.system(size: 12))
-                    Button("取消") { naming = false }.buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
+                    Button("存") { save() }.buttonStyle(NeutralButtonStyle()).font(.system(size: 12))
+                    Button("取消") { naming = false }.buttonStyle(NeutralButtonStyle()).font(.system(size: 12)).foregroundStyle(.secondary)
                 }
                 .padding(.vertical, 4).overlay(alignment: .bottom) { Rectangle().fill(Color.primary.opacity(0.2)).frame(height: 1) }
             } else {
                 Button { newName = ""; naming = true } label: { Label("把当前调整存为预设", systemImage: "plus").font(.system(size: 12)) }
-                    .buttonStyle(.plain).disabled(state.source == nil)
+                    .buttonStyle(NeutralButtonStyle()).disabled(state.source == nil)
             }
             if !state.userPresets.isEmpty {
                 GroupTitle("我的")
@@ -213,17 +214,18 @@ struct PresetsView: View {
             ForEach(list) { p in
                 Button { state.applyPreset(p) } label: {
                     VStack(alignment: .leading, spacing: 5) {
-                        ZStack {
-                            Rectangle().fill(Color.primary.opacity(0.05))
-                            if let img = state.thumbnail(for: p) { Image(cg: img).resizable().scaledToFill() }
-                        }
-                        .frame(height: 74).clipped()
-                        .overlay(Rectangle().stroke(Color.primary.opacity(0.12), lineWidth: 1))
+                        Rectangle().fill(Color.primary.opacity(0.05))
+                            .frame(height: 74)
+                            .overlay {
+                                if let img = state.thumbnail(for: p) { Image(cg: img).resizable().scaledToFill() }
+                            }
+                            .clipped()
+                            .overlay(Rectangle().stroke(Color.primary.opacity(0.12), lineWidth: 1))
                         Text(p.name).font(.system(size: 11)).lineLimit(1)
                     }
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(NeutralButtonStyle(cornerRadius: 0, outlined: true))
                 .contextMenu { if !p.builtin { Button("删除") { state.deletePreset(p) } } }
             }
         }

@@ -168,11 +168,14 @@ struct MaskPanel: View {
                 Toggle("", isOn: Binding(get: { m.enabled }, set: { v in update(m.id) { $0.enabled = v } })).labelsHidden().controlSize(.mini).help("启用")
                 Text(m.name).font(.system(size: 12)).foregroundStyle(on ? .primary : .secondary)
                 Spacer()
-                Button { state.deleteMask(m.id) } label: { Image(systemName: "xmark").font(.system(size: 9)) }.buttonStyle(.plain).foregroundStyle(.secondary).help("删除")
+                Button("删除蒙版", systemImage: "xmark") { state.deleteMask(m.id) }
+                    .labelStyle(.iconOnly).font(.system(size: 9))
+                    .buttonStyle(NeutralButtonStyle()).foregroundStyle(.secondary).help("删除")
             }
             .padding(.horizontal, 8).frame(height: 26)
             .overlay(Rectangle().stroke(Color.primary.opacity(on ? 0.5 : 0.12), lineWidth: 1))
             .contentShape(Rectangle())
+            .modifier(ControlFeedback(cornerRadius: 0))
             .onTapGesture { state.selectedMask = on ? nil : m.id }
             .help(m.type == .radial || m.type == .linear ? "点击选中后，可以在图上拖动摆放" : "点击选中")
         }
@@ -248,7 +251,7 @@ struct PanelSection<Content: View>: View {
                 }
                 .padding(.horizontal, 14).padding(.vertical, 11).contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(NeutralButtonStyle(cornerRadius: 0))
             if open { VStack(alignment: .leading, spacing: 2) { content }.padding(.horizontal, 14).padding(.bottom, 14) }
             Divider()
         }
@@ -270,7 +273,7 @@ struct TabText: View {
                 .padding(.horizontal, 8).padding(.vertical, 3)
                 .overlay(alignment: .bottom) { if on { Rectangle().frame(height: 1) } }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(NeutralButtonStyle())
     }
 }
 

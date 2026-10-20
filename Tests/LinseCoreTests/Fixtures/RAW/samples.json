@@ -1,0 +1,95 @@
+{
+  "source": "https://raw.pixls.us/",
+  "samples": [
+    {
+      "id": 915,
+      "name": "915.dng",
+      "camera": "Apple iPhone 6s Plus",
+      "mode": "16bit (4:3)",
+      "notes": "",
+      "url": "https://raw.pixls.us/getfile.php/915/nice/Apple - iPhone 6s Plus - 16bit (4:3).DNG",
+      "sha256": "845fee4f09c832af3728778737f5ae9b99124debb821b6e2066b94aed1daa91c",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": 4264,
+      "name": "4264.dng",
+      "camera": "Apple iPhone 12 Pro",
+      "mode": "8bit (4:3)",
+      "notes": "ljpeg predictor = 7",
+      "url": "https://raw.pixls.us/getfile.php/4264/nice/Apple - iPhone 12 Pro - 8bit (4:3).DNG",
+      "sha256": "e91e77a4533ed7cce551d83330676ea5c47dd5e55fb38adda7819366afdbdfc2",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": 1018,
+      "name": "1018.cr2",
+      "camera": "Canon EOS 20D",
+      "mode": "RAW (3:2)",
+      "notes": "",
+      "url": "https://raw.pixls.us/getfile.php/1018/nice/Canon - EOS 20D - RAW (3:2).CR2",
+      "sha256": "db78660d48589130d99e0bc621424851eb0f84df052634fb5bc89c7a02fe7033",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": 4659,
+      "name": "4659.cr3",
+      "camera": "Canon EOS R6",
+      "mode": "3:2",
+      "notes": "CRAW 1.6x crop",
+      "url": "https://raw.pixls.us/getfile.php/4659/nice/Canon - EOS R6 - 3:2.CR3",
+      "sha256": "74abb0a113d075ad9887a058082f40dd2a938c4813a08474d82356f11a027778",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": 1325,
+      "name": "1325.nef",
+      "camera": "Nikon D90",
+      "mode": "12bit 12bit compressed (Lossy (type 2)) (3:2)",
+      "notes": "",
+      "url": "https://raw.pixls.us/getfile.php/1325/nice/Nikon - D90 - 12bit 12bit compressed (Lossy (type 2)) (3:2).NEF",
+      "sha256": "9eb3daa4e3d1c1614bccc4c6d136c4166960f936f17c437cc4d11a5786b2df06",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": 1581,
+      "name": "1581.arw",
+      "camera": "Sony ILCE-7S",
+      "mode": "14bit 14bit compressed (3:2)",
+      "notes": "Fullframe non-crop",
+      "url": "https://raw.pixls.us/getfile.php/1581/nice/Sony - ILCE-7S - 14bit 14bit compressed (3:2).ARW",
+      "sha256": "7cc338a0abc8fdad32d61006f1f8f412297b93e040c7efba572eb2bd8f8e8be2",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": 2421,
+      "name": "2421.raf",
+      "camera": "Fujifilm X-T1",
+      "mode": "14bit 14bit uncompressed (3:2)",
+      "notes": "",
+      "url": "https://raw.pixls.us/getfile.php/2421/nice/Fujifilm - X-T1 - 14bit 14bit uncompressed (3:2).RAF",
+      "sha256": "e994a1fd6e87e392432fe146a35b0b88584dc2bd50bee2c8c7e886ac2b59fcde",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": 1803,
+      "name": "1803.orf",
+      "camera": "Olympus E-3",
+      "mode": "16bit (4:3)",
+      "notes": "",
+      "url": "https://raw.pixls.us/getfile.php/1803/nice/Olympus - E-3 - 16bit (4:3).ORF",
+      "sha256": "ba4605bbd9fe9b77971da444bcdb1698904c0ad4ebdf9dd42dd45ab255f3f6d4",
+      "license": "CC0-1.0"
+    },
+    {
+      "id": 1772,
+      "name": "1772.rw2",
+      "camera": "Panasonic DMC-LX7",
+      "mode": "3:2",
+      "notes": "please upload the full set :)",
+      "url": "https://raw.pixls.us/getfile.php/1772/nice/Panasonic - DMC-LX7 - 3:2.RW2",
+      "sha256": "07c96244a3cd36b7301a6b428cbe377ab0362d91973fe56dee006d809c39f573",
+      "license": "CC0-1.0"
+    }
+  ]
+}

@@ -109,13 +109,26 @@ extension AppState {
         forgetLUT(id)
     }
 
-    // MARK: AI 设置（设置存在数据目录，Key 存钥匙串）
+    // MARK: AI 设置（macOS 本地 config；iOS 保持设置文件与钥匙串）
 
+    #if !os(macOS)
     var aiSettingsURL: URL { Self.dataDir.appendingPathComponent("ai-settings.json") }
+    #endif
 
     func loadAISettings() {
+        #if os(macOS)
+        do {
+            let configuration = try aiConfigurationStore.load()
+            aiSettings = configuration.ai
+            savedAIKey = configuration.apiKey
+            aiHasKey = !aiKey().isEmpty
+        } catch {
+            flash("读取 AI 配置失败：\(error.localizedDescription)")
+        }
+        #else
         if let d = try? Data(contentsOf: aiSettingsURL), let s = try? JSONDecoder().decode(AISettings.self, from: d) { aiSettings = s }
         aiHasKey = !AIKeychain.load().isEmpty
+        #endif
     }
 
     /// key 为 nil 表示不修改已保存的 Key
@@ -123,8 +136,13 @@ extension AppState {
         var s = s
         s.baseUrl = s.baseUrl.trimmingCharacters(in: .whitespaces)
         s.model = s.model.trimmingCharacters(in: .whitespaces)
-        if s.model.isEmpty { s.model = AISettings().model }
-        if s.proto != .anthropic { s.fast = false }
+        if s.model.isEmpty { s.model = s.proto.defaultModel }
+        #if os(macOS)
+        let configuration = try aiConfigurationStore.save(settings: s, key: key?.trimmingCharacters(in: .whitespacesAndNewlines))
+        aiSettings = configuration.ai
+        savedAIKey = configuration.apiKey
+        aiHasKey = !aiKey().isEmpty
+        #else
         let data = try JSONEncoder().encode(s)
         try data.write(to: aiSettingsURL, options: .atomic)
         if let key {
@@ -132,6 +150,7 @@ extension AppState {
         }
         aiSettings = s
         aiHasKey = !AIKeychain.load().isEmpty
+        #endif
     }
 
     // MARK: 日夜间模式

@@ -27,15 +27,20 @@ struct AISettingsView: View {
             HStack {
                 Text("AI 设置").font(.system(size: 13, weight: .medium))
                 Spacer()
-                Button { dismiss() } label: { Image(systemName: "xmark").font(.system(size: 11, weight: .light)) }.buttonStyle(.plain).keyboardShortcut(.cancelAction)
+                Button { dismiss() } label: {
+                    Label("关闭 AI 设置", systemImage: "xmark")
+                        .labelStyle(.iconOnly).font(.system(size: 11, weight: .light))
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(NeutralButtonStyle()).keyboardShortcut(.cancelAction)
             }
-            .padding(.horizontal, 22).padding(.vertical, 16)
+            .padding(.leading, 22).padding(.trailing, 8).padding(.vertical, 6)
             Divider()
             VStack(alignment: .leading, spacing: 18) {
                 field("接口协议") {
-                    Picker("", selection: $s.proto) {
+                    Picker("接口协议", selection: $s.proto) {
+                        Text("OpenAI").tag(AIProtocol.openai)
                         Text("Anthropic").tag(AIProtocol.anthropic)
-                        Text("OpenAI 兼容").tag(AIProtocol.openai)
                     }
                     .pickerStyle(.segmented).labelsHidden()
                 }
@@ -52,8 +57,9 @@ struct AISettingsView: View {
                             if showKey { TextField(state.aiHasKey ? "已保存 · 留空不修改" : "sk-…", text: $key) }
                             else { SecureField(state.aiHasKey ? "已保存 · 留空不修改" : "sk-…", text: $key) }
                         }
-                        Button { showKey.toggle() } label: { Image(systemName: showKey ? "eye.slash" : "eye").font(.system(size: 11)) }
-                            .buttonStyle(.plain).foregroundStyle(.secondary)
+                        Button(showKey ? "隐藏 API Key" : "显示 API Key", systemImage: showKey ? "eye.slash" : "eye") { showKey.toggle() }
+                            .labelStyle(.iconOnly).font(.system(size: 11))
+                            .buttonStyle(NeutralButtonStyle()).foregroundStyle(.secondary)
                     }
                 }
                 field("模型", hint: modelHint, warn: true) {
@@ -61,7 +67,7 @@ struct AISettingsView: View {
                         if manual || models.isEmpty {
                             LineField { TextField("模型 ID", text: $s.model) }
                         } else {
-                            Picker("", selection: Binding(get: { s.model }, set: { v in if v == "__manual__" { manual = true } else { s.model = v } })) {
+                            Picker("模型", selection: Binding(get: { s.model }, set: { v in if v == "__manual__" { manual = true } else { s.model = v } })) {
                                 ForEach(models, id: \.self) { Text($0).tag($0) }
                                 Divider()
                                 Text("手动输入…").tag("__manual__")
@@ -69,45 +75,62 @@ struct AISettingsView: View {
                             .labelsHidden()
                         }
                         Button("获取模型") { Task { await loadModels(quiet: false) } }.controlSize(.small)
+                            .help("只读取模型名称列表，不代表模型可以生成回复。请用“测试连接”验证当前模型。")
                     }
                 }
                 field("思考强度") {
-                    Picker("", selection: $s.effort) { ForEach(Self.efforts, id: \.0) { Text($0.1).tag($0.0) } }
+                    Picker("思考强度", selection: $s.effort) { ForEach(Self.efforts, id: \.0) { Text($0.1).tag($0.0) } }
                         .pickerStyle(.segmented).labelsHidden()
                         .help(s.proto == .openai ? "作为 reasoning_effort 传递，很多模型只认 低 / 中 / 高" : "作为 effort 传递")
                 }
-                Toggle("快速模式", isOn: $s.fast)
-                    .font(.system(size: 12)).toggleStyle(.switch).controlSize(.small).disabled(s.proto != .anthropic)
-                    .help(s.proto == .anthropic ? "输出更快，价格更高；仅官方接口的 Opus 5.5 / 5 / 4.8" : "OpenAI 兼容协议没有快速模式")
+                HStack(spacing: 10) {
+                    Text("快速模式").font(.callout)
+                    Spacer()
+                    Text("可能增加费用").font(.subheadline).foregroundStyle(.secondary)
+                    Toggle("快速模式", isOn: $s.fast)
+                        .labelsHidden().toggleStyle(.switch).controlSize(.small)
+                        .help("优先处理请求，需当前服务和模型支持。")
+                }
             }
             .padding(22)
             Divider()
-            HStack(spacing: 10) {
-                Button(testing ? "测试中…" : "测试连接") { Task { await runTest() } }.disabled(testing)
-                Text(test).font(.system(size: 11)).foregroundStyle(testOK ? Color.green : Color.orange).lineLimit(2)
-                Spacer()
-                Button("取消") { dismiss() }
-                Button("保存") { save() }.keyboardShortcut(.defaultAction)
+            VStack(alignment: .leading, spacing: 12) {
+                if !test.isEmpty {
+                    Text(test).font(.callout).foregroundStyle(testOK ? Color.green : Color.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                }
+                HStack(spacing: 10) {
+                    Button(testing ? "测试中…" : "测试连接") { Task { await runTest() } }.disabled(testing)
+                    Spacer()
+                    Button("取消") { dismiss() }
+                    Button("保存") { save() }.keyboardShortcut(.defaultAction)
+                }
             }
             .controlSize(.regular)
             .padding(.horizontal, 22).padding(.vertical, 14)
         }
+        #if os(macOS)
         .frame(width: 480)
+        #else
+        .frame(maxWidth: 480)
+        #endif
         .onAppear {
             s = state.aiSettings
             models = [s.model]
             if state.aiHasKey { Task { await loadModels(quiet: true) } }
         }
-        .onChange(of: s.proto) { p in
+        .onChange(of: s.proto) {
             loadSeq += 1
-            if p != .anthropic { s.fast = false }
             modelHint = ""; test = ""
         }
-        .onChange(of: urlFocused) { f in
+        .onChange(of: urlFocused) { _, f in
             // 只在离开输入框时检查地址格式，输入过程中不打扰
             if !f { urlHint = AIClient.urlOK(s.baseUrl) ? "" : "地址需要以 http:// 或 https:// 开头" }
         }
-        .onChange(of: s.baseUrl) { _ in if !urlHint.isEmpty, AIClient.urlOK(s.baseUrl) { urlHint = "" } }
+        .onChange(of: s.baseUrl) { if !urlHint.isEmpty, AIClient.urlOK(s.baseUrl) { urlHint = "" } }
+        .onChange(of: s) { test = "" }
+        .onChange(of: key) { test = "" }
     }
 
     func field<C: View>(_ title: String, hint: String = "", warn: Bool = false, @ViewBuilder _ c: () -> C) -> some View {
@@ -118,7 +141,7 @@ struct AISettingsView: View {
         }
     }
 
-    var effectiveKey: String { key.isEmpty ? AIKeychain.load() : key }
+    var effectiveKey: String { key.isEmpty ? state.aiKey() : key }
 
     func loadModels(quiet: Bool) async {
         guard AIClient.urlOK(s.baseUrl) else { if !quiet { modelHint = "地址格式不对，先改好 Base URL" }; return }
@@ -144,12 +167,16 @@ struct AISettingsView: View {
 
     func runTest() async {
         guard AIClient.urlOK(s.baseUrl) else { testOK = false; test = "地址格式不对"; return }
+        let settings = s, enteredKey = key
+        let requestKey = effectiveKey
         testing = true; test = "测试中…"
         defer { testing = false }
         do {
-            let r = try await AIClient.test(s, key: effectiveKey)
+            let r = try await AIClient.test(settings, key: requestKey)
+            guard s == settings, key == enteredKey else { return }
             testOK = true; test = "已连通 · \(r)"
         } catch {
+            guard s == settings, key == enteredKey else { return }
             testOK = false; test = error.localizedDescription
         }
     }
