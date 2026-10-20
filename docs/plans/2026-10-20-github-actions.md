@@ -1,5 +1,7 @@
 # GitHub Actions Implementation Plan
 
+**后续调整（2026-10-20）：** 用户明确只需要手动打包发布，已移除独立 CI 工作流。普通 push 和 PR 不运行检查，验证保留在手动发布流程中。以下为最初实施记录，当前操作以 `docs/github-actions.md` 为准。
+
 **Goal:** 用户选择自动检查代码、从 GitHub 手动触发 macOS 打包、签名、公证和私有 Release 发布。
 
 **Architecture:** 代码检查与签名发布分开；使用 GitHub 托管的 Apple Silicon macOS 15、Xcode 16.4。发布只接受 main 的固定提交、合法版本和构建号；编译签名任务只有读取代码权限，完成公证的产物交给独立发布任务上传。已有 v0.2.10 保留。

@@ -1,8 +1,7 @@
-# GitHub 自动检查与手动发布
+# GitHub 手动打包与发布
 
-**Release** 是版本说明和安装包的下载页；**Actions** 是执行检查、打包和发布的 CI/CD 流水线。仓库与 Release 保持私有，下载需要有仓库访问权限。
+**Release** 是版本说明和安装包的下载页；**Actions** 用于手动触发测试、编译、签名、公证和发布。普通推送和 PR 不运行云端检查或构建。仓库与 Release 保持私有，下载需要有仓库访问权限。
 
-- [自动检查 CI](https://github.com/ruixingshi/linse/actions/workflows/ci.yml)：推送到 `main`、提交 PR 或手动运行时检查代码。
 - [发布 macOS 版本](https://github.com/ruixingshi/linse/actions/workflows/release.yml)：仅手动触发，支持 M 系列 Mac、macOS 14+。
 - [已有 Release](https://github.com/ruixingshi/linse/releases)：已发布版本不会被覆盖。
 
@@ -47,7 +46,7 @@ App 专用密码可使用有效的已有密码，也可在 [Apple 账号](https:
 
 ## 每次发布怎么操作
 
-1. 将本次代码提交到 `main`，确认 CI 通过，并在实际 Mac 上完成需要的功能测试。
+1. 在实际 Mac 上完成需要的功能测试，将本次代码提交并推送到 `main`。
 2. 打开 **Actions → 发布 macOS 版本 → Run workflow**，分支选择 **main**。
 3. 填写新版本号和新构建号，例如 `0.2.11`、`13`，可选填更新说明。版本号不带 `v`；不要复用已经发布的版本。
 4. 点击 **Run workflow**。流程依次校验配置、测试与编译、签名应用、公证应用、制作并公证 DMG，最后发布 Release。
@@ -55,22 +54,22 @@ App 专用密码可使用有效的已有密码，也可在 [Apple 账号](https:
 
 更新说明填写用户可感知的功能变化或问题修复；发布页自动附上适用系统和安装方法。
 
-流水线自动创建 `v<版本号>` 标签并指向本次运行的固定提交，不需要先手动创建 Release。普通代码推送只触发检查，不会自动发布。
+流水线自动创建 `v<版本号>` 标签并指向本次运行的固定提交，不需要先手动创建 Release。仅点击 **Run workflow** 时启动发布流程。
 
 发布任务先创建草稿，只有 DMG 和校验文件上传后与 GitHub 返回的 SHA-256 一致，才将草稿发布。同一次运行上传中断时，可使用 **Re-run failed jobs**：继续使用已经打包的产物和同一草稿。已有附件内容不匹配、标签冲突或其他运行留下同名草稿时会停止，需先检查原因，不会直接覆盖文件。构建产物在 Actions 中保留 7 天；成功发布的 Release 附件不受这 7 天限制。
 
-## 检查范围
+## 发布时的验证范围
 
-CI 使用 GitHub 托管的 Apple Silicon macOS 15 和 Xcode 16.4，编译 Mac arm64 Release 和 iOS 共享代码。如果 runner 能提供 Metal GPU，则运行完整 Swift 测试；没有 GPU 时仅运行 AI 协议、配置、XMP、LUT 持久化等不依赖 GPU 的测试，并在执行摘要中说明。
+手动发布使用 GitHub 托管的 Apple Silicon macOS 15 和 Xcode 16.4，编译 Mac arm64 Release 和 iOS 共享代码。如果 runner 能提供 Metal GPU，则运行完整 Swift 测试；没有 GPU 时仅运行 AI 协议、配置、XMP、LUT 持久化等不依赖 GPU 的测试，并在执行摘要中说明。
 
-CI 不等于完整产品验收：GPU 渲染、RAW 样片、图片导出和界面交互仍需在实际 Mac 验证；iOS 检查仅覆盖共享代码编译，不代表已在 iPhone / iPad 或模拟器运行。外部 RAW 样片和可选模拟服务未提供时，对应测试会明确跳过。
+自动验证不等于完整产品验收：GPU 渲染、RAW 样片、图片导出和界面交互仍需在实际 Mac 验证；iOS 检查仅覆盖共享代码编译，不代表已在 iPhone / iPad 或模拟器运行。外部 RAW 样片和可选模拟服务未提供时，对应测试会明确跳过。
 
-本机也可执行与 CI 相同的检查：
+本机也可执行与发布流程相同的检查：
 
 ```sh
 bash scripts/check-ci.sh
 ```
 
-发布工作流只有最后上传 Release 的任务具有仓库写权限；签名材料仅注入手动发布的签名步骤，不提供给 PR 检查。GitHub 托管 runner 会使用账号的 Actions 配额；本配置不会调整付费额度。
+发布工作流只有最后上传 Release 的任务具有仓库写权限；签名材料仅注入手动发布的签名步骤。运行发布任务会使用账号的 Actions 配额，普通推送和 PR 不启动任务；本配置不会调整付费额度。
 
 官方说明：[手动运行工作流](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow)、[在 macOS runner 安装签名证书](https://docs.github.com/en/actions/how-tos/deploy/deploy-to-third-party-platforms/sign-xcode-applications)。

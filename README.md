@@ -72,9 +72,9 @@ NOTARY_PROFILE=linse-notary bash scripts/notarize.sh \
 LINSE_VERSION=0.2.11 LINSE_BUILD_NUMBER=13 bash scripts/package.sh --release
 ```
 
-## GitHub 自动检查与发布
+## GitHub 手动打包与发布
 
-推送到 `main` 或提交 PR 后，GitHub Actions 自动运行测试、Mac arm64 编译和 iOS 共享代码编译。正式发布在 [Actions → 发布 macOS 版本](https://github.com/ruixingshi/linse/actions/workflows/release.yml) 手动触发：填写新版本号和构建号，完成签名、公证与 DMG 校验后发布到私有仓库的 Release。
+GitHub Actions 仅用于手动发布，普通推送和 PR 不触发检查或构建。在 [Actions → 发布 macOS 版本](https://github.com/ruixingshi/linse/actions/workflows/release.yml) 点击 **Run workflow**，填写新版本号和构建号，流程会执行测试与编译、签名、公证和 DMG 校验，再发布到私有仓库的 Release。
 
 首次云端发布需要配置签名证书及公证授权，具体步骤、检查范围和失败恢复见 [GitHub Actions 使用说明](docs/github-actions.md)。
 
