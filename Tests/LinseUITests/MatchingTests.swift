@@ -19,6 +19,7 @@ final class MatchingTests: XCTestCase {
         state.applyPreset(Preset(id: "before", name: "before", params: params))
         let before = try state.proxy.renderRGBA8(Params(), width: 64, height: 32)
         state.runMatch(useAI: true)
+        state.confirmAIPhotoConsent(try XCTUnwrap(state.aiPhotoConsent).id)
         await state.aiTask?.value
         XCTAssertNil(state.busy)
         XCTAssertTrue(state.toast?.contains("模拟接口失败") == true)
@@ -57,6 +58,7 @@ final class MatchingTests: XCTestCase {
         let state = makeState(directory, service)
         let before = try state.proxy.renderRGBA8(Params(), width: 64, height: 32)
         state.runMatch(useAI: true)
+        state.confirmAIPhotoConsent(try XCTUnwrap(state.aiPhotoConsent).id)
         let task = try XCTUnwrap(state.aiTask)
         await fulfillment(of: [entered], timeout: 5)
         XCTAssertEqual(state.proxy.imageSize, CGSize(width: 64, height: 32), "网络等待期间也不能借用预览渲染器")
@@ -68,6 +70,7 @@ final class MatchingTests: XCTestCase {
         XCTAssertEqual(state.toast, "已取消")
         XCTAssertEqual(try state.proxy.renderRGBA8(Params(), width: 64, height: 32), before)
         state.runMatch(useAI: true)
+        state.confirmAIPhotoConsent(try XCTUnwrap(state.aiPhotoConsent).id)
         await state.aiTask?.value
         XCTAssertNil(state.busy)
         XCTAssertEqual(state.summary?.source, "AI 辅助匹配")

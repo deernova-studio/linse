@@ -83,6 +83,12 @@ public struct AIImages: Sendable {
 }
 
 public enum AIClient {
+    public static let session: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpShouldSetCookies = false
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        return URLSession(configuration: configuration, delegate: AIRequestRedirectPolicy(), delegateQueue: nil)
+    }()
     static let system = """
     你是专业的照片调色师，熟悉 Lightroom / Camera Raw。用户会给你两张图：第一张是"原图"，第二张是"目标风格图"。
     你的任务：判断目标图的调色风格（而不是画面内容），给出把原图调成这种风格的一组滑块值。
@@ -321,7 +327,7 @@ public enum AIClient {
     }
 
     /// 从接口动态获取可用模型列表
-    public static func listModels(_ s: AISettings, key: String, session: URLSession = .shared) async throws -> [String] {
+    public static func listModels(_ s: AISettings, key: String, session: URLSession = AIClient.session) async throws -> [String] {
         guard !key.isEmpty else { throw AIError("还没有填写 API Key") }
         if s.proto == .openai {
             let j = try await send(try request(openaiBase(s.baseUrl) + "/models", key: key, timeout: 20, headers: ["Authorization": "Bearer \(key)"], body: nil), session: session)
@@ -339,7 +345,7 @@ public enum AIClient {
         return ids
     }
 
-    public static func test(_ s: AISettings, key: String, session: URLSession = .shared) async throws -> String {
+    public static func test(_ s: AISettings, key: String, session: URLSession = AIClient.session) async throws -> String {
         let t = try await call(s, key: key, imgs: nil, prompt: "只回复两个字：连通", maxTokens: 1024, session: session)
         let r = String(t.trimmingCharacters(in: .whitespacesAndNewlines).prefix(40))
         guard !r.isEmpty else { throw AIError("接口已响应，但模型没有返回有效文字。请尝试降低思考强度，或向服务商确认模型是否可用。") }
@@ -347,7 +353,7 @@ public enum AIClient {
     }
 
     /// 看图分析；取消外层 Task 会中止网络请求
-    public static func analyze(_ s: AISettings, key: String, images: AIImages, session: URLSession = .shared) async throws -> AIAnalysis {
+    public static func analyze(_ s: AISettings, key: String, images: AIImages, session: URLSession = AIClient.session) async throws -> AIAnalysis {
         let text = try await call(s, key: key, imgs: images, prompt: "请分析并按要求输出 JSON。", maxTokens: 16000, session: session)
         guard let a = text.firstIndex(of: "{"), let b = text.lastIndex(of: "}"), a < b,
               let j = try? JSONSerialization.jsonObject(with: Data(text[a...b].utf8)) as? [String: Any] else { throw AIError("模型没有返回 JSON") }

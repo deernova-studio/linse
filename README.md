@@ -17,6 +17,7 @@
 | `Sources/LinseCore` | 调色渲染、匹配、蒙版、资源与导出 |
 | `Sources/LinseUI` | 共享界面与编辑状态，以及两端的界面适配 |
 | `Sources/LinseMac` | macOS App 入口 |
+| `macOS/Linse.xcodeproj` | 启用沙盒的 Mac App Store 工程，引用同一入口与共享 Swift 包 |
 | `iOS/Linse.xcodeproj` | iPhone / iPad App 工程，引用本地 Swift 包 |
 | `Tests` | 核心与编辑流程的回归测试 |
 
@@ -38,7 +39,9 @@ bash scripts/package.sh
 
 `bash scripts/package.sh --dev` 会生成独立的 `build/dev/临色.app`。更新之前关闭对应的开发版窗口，保留其他版本中的编辑；无需生成安装包。
 
-Mac 版的 AI 接口设置与 API Key 一起明文保存到 `~/.linse/config.json`，不再使用钥匙串。首次升级时会保留旧版接口设置，需要在 AI 设置里重新填入一次 API Key；保存后，后续启动与更新都会读取这个配置文件。旧钥匙串条目不会自动读取或删除。iPhone / iPad 的存储方式本次不变。
+DMG 版的 AI 接口设置与 API Key 一起明文保存到 `~/.linse/config.json`，不再使用钥匙串。商店版改用应用沙盒内的 `Application Support/Linse/config.json`，不读取沙盒外的配置。首次升级时会保留旧版接口设置，需要在 AI 设置里重新填入一次 API Key；保存后，后续启动与更新都会读取这个配置文件。旧钥匙串条目不会自动读取或删除。iPhone / iPad 的存储方式本次不变。
+
+AI 辅助匹配在每次发送照片前显示接收服务并征求同意，只发送去除元数据的缩小预览。设置内可查看隐私说明或清除 API Key；本地计算匹配不需要 AI 服务。
 
 ## macOS 正式签名与分发
 
@@ -77,6 +80,10 @@ LINSE_VERSION=0.2.11 LINSE_BUILD_NUMBER=13 bash scripts/package.sh --release
 GitHub Actions 仅用于手动发布，普通推送和 PR 不触发检查或构建。在 [Actions → 发布 macOS 版本](https://github.com/ruixingshi/linse/actions/workflows/release.yml) 点击 **Run workflow**，填写新版本号和构建号，流程会执行测试与编译、签名、公证和 DMG 校验，再发布到私有仓库的 Release。
 
 首次云端发布需要配置签名证书及公证授权，具体步骤、检查范围和失败恢复见 [GitHub Actions 使用说明](docs/github-actions.md)。
+
+## Mac App Store
+
+首次商店版本免费、无内购。用 Xcode 打开 `macOS/Linse.xcodeproj` 可运行沙盒版；`bash scripts/app-store.sh build` 可进行本机临时签名测试。商店归档、专用证书、手动上传流程及审核资料见 [Mac App Store 说明](docs/app-store.md)。上传 Apple 后台不会自动提交审核或上架。
 
 ## 移动端开发与运行
 

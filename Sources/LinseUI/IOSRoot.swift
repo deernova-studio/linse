@@ -76,6 +76,7 @@ public struct IOSRootView: View {
             if case .success(let urls) = r { state.importLUTs(urls) }
         }
         .sheet(isPresented: $state.showAISettings) { NavigationStack { ScrollView { AISettingsView(state: state).frame(maxWidth: .infinity) } } }
+        .sheet(item: $state.aiPhotoConsent) { AIPhotoConsentView(state: state, request: $0) }
         .sheet(item: $state.inspectedSlot) { ImageInspectionView(state: state, kind: $0) }
         .modifier(ImageImportAlert(state: state))
         .sheet(item: $share) { ShareSheet(file: $0).ignoresSafeArea() }

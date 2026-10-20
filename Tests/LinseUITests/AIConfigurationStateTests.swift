@@ -77,6 +77,7 @@ final class AIConfigurationStateTests: XCTestCase {
         state.load(CIImage(color: .red).cropped(to: CGRect(x: 0, y: 0, width: 16, height: 16)), name: "source", into: .source)
         state.load(CIImage(color: .blue).cropped(to: CGRect(x: 0, y: 0, width: 16, height: 16)), name: "target", into: .target)
         state.runMatch(useAI: true)
+        state.confirmAIPhotoConsent(try XCTUnwrap(state.aiPhotoConsent).id)
         await state.aiTask?.value
         await fulfillment(of: [called], timeout: 5)
         XCTAssertFalse(state.showAISettings)

@@ -5,6 +5,8 @@
 - [发布 macOS 版本](https://github.com/ruixingshi/linse/actions/workflows/release.yml)：仅手动触发，支持 M 系列 Mac、macOS 14+。
 - [已有 Release](https://github.com/ruixingshi/linse/releases)：已发布版本不会被覆盖。
 
+Mac App Store 使用独立的手动上传工作流，不生成 DMG Release。它需要另外配置商店签名，见 [Mac App Store 说明](app-store.md)；现有 Developer ID 配置无需修改。
+
 ## 首次配置发布授权
 
 本机的 `linse-notary` 钥匙串配置不会自动传到 GitHub。云端使用一次性的签名钥匙串，构建结束后清理。

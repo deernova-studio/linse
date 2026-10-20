@@ -76,8 +76,12 @@ public enum Exporter {
     }
 
     public static func write(_ img: CGImage, to url: URL, format: ExportFormat) throws {
-        let staging = url.deletingLastPathComponent().appendingPathComponent(".linse-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        // A save-panel grant covers the chosen file, not arbitrary sibling directories.
+        // The system supplies a writable replacement directory on the destination volume.
+        let staging = try FileManager.default.url(for: .itemReplacementDirectory, in: .userDomainMask,
+                                                  appropriateFor: url, create: true)
         defer { try? FileManager.default.removeItem(at: staging) }
         // ImageIO 编码失败时可能留下它自己的临时文件，一并限定在本次任务目录内。
         let temporary = staging.appendingPathComponent("image.\(format.ext)")

@@ -55,7 +55,7 @@ public actor MatchService {
 
     private static func jpegBase64(_ image: CIImage, _ context: CIContext) throws -> String {
         let scale = min(1, 1024 / max(image.extent.width, image.extent.height))
-        let small = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+        let small = image.transformed(by: CGAffineTransform(scaleX: scale, y: scale)).settingProperties([:])
         guard let data = context.jpegRepresentation(of: small, colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!,
             options: [CIImageRepresentationOption(rawValue: kCGImageDestinationLossyCompressionQuality as String): 0.9])
         else { throw AIError("图片编码失败") }

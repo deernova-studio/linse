@@ -18,6 +18,8 @@ struct AISettingsView: View {
     @State private var testOK = false
     @State private var testing = false
     @State private var loadSeq = 0
+    @State private var showPrivacy = false
+    @State private var confirmClearKey = false
     @FocusState private var urlFocused: Bool
 
     static let efforts: [(AIEffort, String)] = [(.auto, "默认"), (.low, "低"), (.medium, "中"), (.high, "高"), (.xhigh, "很高"), (.max, "最高")]
@@ -61,6 +63,10 @@ struct AISettingsView: View {
                             .labelStyle(.iconOnly).font(.system(size: 11))
                             .buttonStyle(NeutralButtonStyle()).foregroundStyle(.secondary)
                     }
+                    if state.aiHasKey {
+                        Button("清除已保存的 API Key") { confirmClearKey = true }
+                            .font(.caption).buttonStyle(NeutralButtonStyle())
+                    }
                 }
                 field("模型", hint: modelHint, warn: true) {
                     HStack(spacing: 10) {
@@ -102,6 +108,7 @@ struct AISettingsView: View {
                 }
                 HStack(spacing: 10) {
                     Button(testing ? "测试中…" : "测试连接") { Task { await runTest() } }.disabled(testing)
+                    Button("隐私说明") { showPrivacy = true }
                     Spacer()
                     Button("取消") { dismiss() }
                     Button("保存") { save() }.keyboardShortcut(.defaultAction)
@@ -131,6 +138,13 @@ struct AISettingsView: View {
         .onChange(of: s.baseUrl) { if !urlHint.isEmpty, AIClient.urlOK(s.baseUrl) { urlHint = "" } }
         .onChange(of: s) { test = "" }
         .onChange(of: key) { test = "" }
+        .sheet(isPresented: $showPrivacy) { PrivacyPolicyView() }
+        .confirmationDialog("清除这台设备上保存的 API Key？", isPresented: $confirmClearKey, titleVisibility: .visible) {
+            Button("清除 API Key", role: .destructive, action: clearSavedKey)
+            Button("取消", role: .cancel) { }
+        } message: {
+            Text("之后仍可离线编辑。重新使用 AI 时需要再次填写 Key。")
+        }
     }
 
     func field<C: View>(_ title: String, hint: String = "", warn: Bool = false, @ViewBuilder _ c: () -> C) -> some View {
@@ -189,6 +203,19 @@ struct AISettingsView: View {
             dismiss()
         } catch {
             testOK = false; test = "保存失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func clearSavedKey() {
+        do {
+            try state.saveAISettings(state.aiSettings, key: "")
+            key = ""
+            testOK = true
+            test = "已清除保存的 API Key"
+            loadSeq += 1
+        } catch {
+            testOK = false
+            test = "清除失败：\(error.localizedDescription)"
         }
     }
 }

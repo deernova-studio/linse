@@ -71,6 +71,8 @@ public final class AppState: ObservableObject {
     @Published var aiSettings = AISettings()
     @Published var aiHasKey = false
     @Published var showAISettings = false
+    @Published var aiPhotoConsent: AIPhotoConsentRequest?
+    @Published var showPrivacyPolicy = false
     @Published var showLUTImporter = false     // iOS：请求打开"文件"选 .cube
     @Published var theme: ThemeMode = .auto { didSet { applyTheme() } }
     var aiTask: Task<Void, Never>?
@@ -87,8 +89,7 @@ public final class AppState: ObservableObject {
     public convenience init() {
         #if os(macOS)
         let configurationStore = LocalAIConfigurationStore(
-            url: FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".linse", isDirectory: true).appendingPathComponent("config.json"),
+            url: Self.aiConfigurationURL,
             legacySettingsURL: Self.dataDir.appendingPathComponent("ai-settings.json"))
         #else
         let configurationStore: LocalAIConfigurationStore? = nil
@@ -326,6 +327,25 @@ public final class AppState: ObservableObject {
             showAISettings = true
             return flash("先填写 API Key")
         }
+        if useAI {
+            aiPhotoConsent = AIPhotoConsentRequest(sourceID: source.id, targetID: target.id, settings: aiSettings)
+            return
+        }
+        startMatch(useAI: false)
+    }
+
+    func confirmAIPhotoConsent(_ id: UUID) {
+        guard let request = aiPhotoConsent, request.id == id else { return }
+        aiPhotoConsent = nil
+        guard request.sourceID == source?.id, request.targetID == target?.id, request.settings == aiSettings else {
+            return flash("照片或 AI 设置已更改，请重新点击 AI 辅助匹配")
+        }
+        guard aiHasKey else { showAISettings = true; return }
+        startMatch(useAI: true)
+    }
+
+    private func startMatch(useAI: Bool) {
+        guard busy == nil, let source, let target else { return }
         let ai = aiSettings, key = useAI ? aiKey() : ""
         let id = UUID()
         matchID = id
@@ -403,6 +423,15 @@ public final class AppState: ObservableObject {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
+
+    #if os(macOS)
+    static var aiConfigurationURL: URL {
+        let directory = Bundle.main.object(forInfoDictionaryKey: "LinseDistribution") as? String == "app-store"
+            ? dataDir
+            : FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".linse", isDirectory: true)
+        return directory.appendingPathComponent("config.json")
+    }
+    #endif
 
     func loadPresets() {
         do {

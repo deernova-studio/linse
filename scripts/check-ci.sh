@@ -6,7 +6,7 @@ case "${1:-}" in
   --portable) METAL_AVAILABLE=no ;;
   *) echo "Usage: $0 [--portable]" >&2; exit 2 ;;
 esac
-for script in scripts/package.sh scripts/notarize.sh scripts/check-ios.sh scripts/check-ci.sh scripts/ci-signing.sh; do
+for script in scripts/*.sh; do
   bash -n "$script"
 done
 PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s scripts/tests -v

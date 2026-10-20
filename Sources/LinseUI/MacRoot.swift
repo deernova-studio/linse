@@ -21,6 +21,9 @@ public struct LinseCommands: Commands {
         CommandGroup(replacing: .appSettings) {
             Button("AI 设置…") { state.showAISettings = true }.keyboardShortcut(",")
         }
+        CommandGroup(replacing: .help) {
+            Button("隐私说明") { state.showPrivacyPolicy = true }
+        }
         CommandMenu("调整") {
             Button("计算匹配") { state.runMatch() }.keyboardShortcut(.return)
             Button("AI 辅助匹配") { state.runMatch(useAI: true) }.keyboardShortcut(.return, modifiers: [.command, .shift])
@@ -119,6 +122,8 @@ public struct MacRootView: View {
             }
         }
         .sheet(isPresented: $state.showAISettings) { AISettingsView(state: state) }
+        .sheet(item: $state.aiPhotoConsent) { AIPhotoConsentView(state: state, request: $0) }
+        .sheet(isPresented: $state.showPrivacyPolicy) { PrivacyPolicyView() }
         .sheet(item: $state.inspectedSlot) { ImageInspectionView(state: state, kind: $0) }
         .modifier(ImageImportAlert(state: state))
         .onAppear { state.applyTheme() }
