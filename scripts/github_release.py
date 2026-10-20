@@ -58,14 +58,12 @@ class Release:
 
     @property
     def body(self):
-        return (
-            f"临色 {self.version}（构建 {self.build}）\n\n"
-            "适用于 Apple 芯片（M 系列）Mac，要求 macOS 14 或更新版本。\n\n"
-            "下载 DMG，打开后将「临色」拖入「应用程序」。应用和 DMG 均已通过 "
-            "Developer ID 签名、Apple 公证与 Gatekeeper 验证。\n\n"
-            "SHA256SUMS.txt 可用于核对安装包完整性。\n\n"
-            f"{self.notes}\n\n{self.marker}"
+        details = (
+            "适用于 M 系列 Mac，需 macOS 14 或更新版本。\n\n"
+            "下载下方 DMG，打开后将「临色」拖入「应用程序」。\n\n"
+            f"{self.marker}"
         )
+        return f"{self.notes}\n\n{details}" if self.notes else details
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):

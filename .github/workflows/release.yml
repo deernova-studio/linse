@@ -12,7 +12,7 @@ on:
         type: string
         required: true
       notes:
-        description: '本次更新说明（可选）'
+        description: '本次功能更新或问题修复（可选）'
         type: string
         required: false
 
