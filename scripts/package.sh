@@ -2,8 +2,12 @@
 # 仅构建 Apple 芯片（arm64）应用；本地使用临时签名，--release 使用 Developer ID 正式签名。
 set -euo pipefail
 cd "$(dirname "$0")/.."
-VERSION="0.2.10"
-BUILD_NUMBER="12"
+VERSION="${LINSE_VERSION:-0.2.10}"
+BUILD_NUMBER="${LINSE_BUILD_NUMBER:-12}"
+if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || [[ ! "$BUILD_NUMBER" =~ ^[1-9][0-9]{0,8}$ ]]; then
+  echo '版本号必须为 x.y.z，构建号必须为最多 9 位的正整数。' >&2
+  exit 2
+fi
 RELEASE=false
 case "${1:-}" in
   "") APP="build/临色.app" ;;

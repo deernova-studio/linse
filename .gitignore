@@ -3,3 +3,6 @@ build/
 *.xcuserstate
 xcuserdata/
 .DS_Store
+__pycache__/
+*.p12
+*.pfx

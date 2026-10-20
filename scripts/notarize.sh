@@ -11,6 +11,10 @@ if [ -z "${NOTARY_PROFILE:-}" ]; then
   echo '请先用 xcrun notarytool store-credentials 配置公证授权，再设置 NOTARY_PROFILE。' >&2
   exit 1
 fi
+NOTARY_ARGS=(--keychain-profile "$NOTARY_PROFILE")
+if [ -n "${NOTARY_KEYCHAIN:-}" ]; then
+  NOTARY_ARGS+=(--keychain "$NOTARY_KEYCHAIN")
+fi
 APP="$(cd "$(dirname "$1")" && pwd)/$(basename "$1")"
 VERSION=$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' "$APP/Contents/Info.plist")
 BUILD_NUMBER=$(/usr/libexec/PlistBuddy -c 'Print CFBundleVersion' "$APP/Contents/Info.plist")
@@ -46,13 +50,13 @@ notarize() {
   receipt="$WORK/${name}-submission.json"
   # 保存提交 ID；中途退出后继续等待原申请，避免重复上传。
   if [ ! -s "$receipt" ]; then
-    xcrun notarytool submit "$artifact" --keychain-profile "$NOTARY_PROFILE" --output-format json > "$receipt.tmp"
+    xcrun notarytool submit "$artifact" "${NOTARY_ARGS[@]}" --output-format json > "$receipt.tmp"
     plutil -extract id raw -o - "$receipt.tmp" >/dev/null
     mv "$receipt.tmp" "$receipt"
   fi
   submission=$(plutil -extract id raw -o - "$receipt")
   echo "等待 Apple 公证：${name}（${submission}）"
-  xcrun notarytool wait "$submission" --keychain-profile "$NOTARY_PROFILE" --output-format json --timeout 20m > "$WORK/${name}-status.json" || wait_exit=$?
+  xcrun notarytool wait "$submission" "${NOTARY_ARGS[@]}" --output-format json --timeout 20m > "$WORK/${name}-status.json" || wait_exit=$?
   status=$(plutil -extract status raw -o - "$WORK/${name}-status.json" 2>/dev/null || true)
   case "$status" in
     Accepted|Invalid|Rejected) ;;
@@ -61,7 +65,7 @@ notarize() {
       exit 1
       ;;
   esac
-  xcrun notarytool log "$submission" --keychain-profile "$NOTARY_PROFILE" "$WORK/${name}-log.json"
+  xcrun notarytool log "$submission" "${NOTARY_ARGS[@]}" "$WORK/${name}-log.json"
   if [ "$status" != Accepted ] || [ "$wait_exit" -ne 0 ]; then
     echo "公证未通过（${status}），查看 $WORK/${name}-log.json。" >&2
     exit 1

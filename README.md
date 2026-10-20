@@ -66,6 +66,18 @@ NOTARY_PROFILE=linse-notary bash scripts/notarize.sh \
 
 脚本先公证应用并附上票据，再生成带“应用程序”快捷入口的 DMG，对 DMG 签名、公证并验证。成功后 `build/releases` 中的 DMG 才是可对外分发的版本，同时生成 SHA-256 校验文件。日志与提交 ID 保存在候选应用旁的 `notarization` 目录，中断后可重新运行继续等待原申请。应用内容改变后应更新版本号重新构建。
 
+指定新版本与构建号时，在打包命令前设置 `LINSE_VERSION` 和 `LINSE_BUILD_NUMBER`，例如：
+
+```sh
+LINSE_VERSION=0.2.11 LINSE_BUILD_NUMBER=13 bash scripts/package.sh --release
+```
+
+## GitHub 自动检查与发布
+
+推送到 `main` 或提交 PR 后，GitHub Actions 自动运行测试、Mac arm64 编译和 iOS 共享代码编译。正式发布在 [Actions → 发布 macOS 版本](https://github.com/ruixingshi/linse/actions/workflows/release.yml) 手动触发：填写新版本号和构建号，完成签名、公证与 DMG 校验后发布到私有仓库的 Release。
+
+首次云端发布需要配置签名证书及公证授权，具体步骤、检查范围和失败恢复见 [GitHub Actions 使用说明](docs/github-actions.md)。
+
 ## 移动端开发与运行
 
 用 Xcode 打开 `iOS/Linse.xcodeproj`，选择 `Linse` 目标，以及 iPhone / iPad 模拟器或真机。运行模拟器需要安装对应运行环境；真机需要配置签名。
