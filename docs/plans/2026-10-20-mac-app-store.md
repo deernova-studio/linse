@@ -48,3 +48,14 @@ Only a Developer ID Application certificate exists locally at the start. App Sto
 - Live sandbox smoke test: imported two local fixture images through the file picker, matched offline, exported JPEG outside the container, replaced the test output successfully, saved JSON configuration inside the container, viewed privacy text, cancelled photo sharing, and cleared the temporary test key.
 - Store description and manual-release option saved; privacy/support web pages remain local drafts pending confirmation of public contact information and hosting.
 - The GitHub store upload workflow is prepared but its separate distribution secrets have not been configured.
+
+## Verified progress — 2026-10-22
+
+- Published the approved support and privacy pages at `https://ruixingshi.github.io/linse-support/` and `/privacy.html`; verified public HTTPS access and saved both URLs in App Store Connect. The app repository remains private.
+- Saved and reloaded reviewer contact information, disabled the app-login requirement, and saved local/optional AI test instructions. The phone number remains only in Apple's reviewer form.
+- Set availability to China mainland only; retained free pricing and manual release after approval.
+- Captured and uploaded three unmodified screenshots from the actual `0.3.0 (14)` archive at 2560 × 1600 pixels. See `docs/store-screenshots.md` for source-photo provenance.
+- Completed content rights and verified the 4+ age rating. Published the privacy answers after the owner's explicit confirmation: Photos or Videos, App Functionality, linked to the AI service account, no tracking.
+- App Store Connect validation passed. Submitted `0.3.0 (14)` at 17:02 China time; submission `460022bf-e0fc-4ba8-afb0-6671d6b104e7` visibly reports **Waiting for Review**. The app is not approved or released yet.
+- No dedicated AI review credential was supplied. Review notes describe the optional BYOK feature and direct reviewers to the saved developer contact for testing assistance.
+- No application code changed during the listing preparation; the build and smoke-test results above remain the verification for this archive. Separate GitHub App Store distribution secrets are still not configured.

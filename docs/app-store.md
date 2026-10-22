@@ -11,7 +11,21 @@
 - SKU：`linse-mac`
 - 首个商店版本：`0.3.0`，构建 `14`
 - 定价基准：中国大陆（CNY），免费
+- 销售范围：仅中国大陆
 - [App Store Connect](https://appstoreconnect.apple.com/apps/6824873396/distribution/macos/version/inflight)
+
+## 当前提交状态
+
+2026 年 10 月 22 日 17:02（中国时间），`0.3.0 (14)` 已提交 Apple，后台确认状态为 **等待审核**。审核通过后手动发布，尚未上架。
+
+- [本次审核记录](https://appstoreconnect.apple.com/apps/6824873396/distribution/reviewsubmissions/details/460022bf-e0fc-4ba8-afb0-6671d6b104e7)
+- 提交 ID：`460022bf-e0fc-4ba8-afb0-6671d6b104e7`
+- 已保存免费定价、中国大陆供应范围、4+ 年龄分级、内容版权、描述、关键词、支持 URL 和隐私政策 URL。
+- 已上传三张实际商店版截图，见 [截图说明](store-screenshots.md)。
+- 已保存审核联系人和测试说明；应用不要求登录。联系电话只保留在 Apple 后台，不记录在仓库。
+- 经负责人确认，已发布 App Privacy：照片或视频仅用于 App 功能、可能与用户的 AI 服务账号关联，不用于追踪。应用没有自己的账号系统、广告或行为统计；本地调色不上传照片。
+
+审核专用 AI 凭证尚未提供；审核说明已明确 AI 是用户自备 API Key 的可选功能，并提供联系开发者协助测试的方式。若审核团队要求访问资料，应通过审核后台处理，不提交个人生产 API Key 到仓库。
 
 商店版使用 `macOS/Linse.xcodeproj`，引用现有共享 Swift 包。AI 配置保存在应用沙盒的 `Application Support/Linse/config.json`，仍是本地 JSON；不会读取沙盒外的 `~/.linse/config.json`。DMG 版继续使用原来的配置位置。
 
@@ -60,7 +74,7 @@ bash scripts/app-store.sh export
 
 上传成功后还要等待 Apple 处理，在 App Store Connect 选择构建、补齐资料并提交审核。该工作流不会提交审核或自动上架。版本发布方式使用“手动发布”。
 
-## 审核前必须完成
+## 后续版本提交检查
 
 - 免费定价、销售地区、年龄分级与版权信息。
 - 在 Apple 后台填写上文已发布的技术支持和隐私政策 URL。
@@ -69,4 +83,4 @@ bash scripts/app-store.sh export
 - 如需审核 AI 功能，提供可供审核使用的服务和凭证，或先与审核团队明确测试方式；不得把个人生产 API Key 放进代码、截图或公开资料。
 - 实测沙盒环境中的导入、离线匹配、导出、设置保存和 AI 发送授权。
 
-商店文案和审核步骤草稿见 [商店资料](store-listing.md)。上传构建、提交审核、审核通过和正式上架是不同状态，应分别确认。
+商店文案和审核步骤见 [商店资料](store-listing.md)。上传构建、提交审核、审核通过和正式上架是不同状态，应分别确认。
