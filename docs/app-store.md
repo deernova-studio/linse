@@ -15,6 +15,15 @@
 
 商店版使用 `macOS/Linse.xcodeproj`，引用现有共享 Swift 包。AI 配置保存在应用沙盒的 `Application Support/Linse/config.json`，仍是本地 JSON；不会读取沙盒外的 `~/.linse/config.json`。DMG 版继续使用原来的配置位置。
 
+## 公开支持与隐私政策
+
+- 技术支持 URL：https://ruixingshi.github.io/linse-support/
+- 隐私政策 URL：https://ruixingshi.github.io/linse-support/privacy.html
+- 公开支持邮箱：`2946193417@qq.com`
+- 网页仓库：[ruixingshi/linse-support](https://github.com/ruixingshi/linse-support)，仅包含两个 HTML 页面和 `.nojekyll`；应用源码仓库继续保持私有。
+
+2026 年 10 月 22 日经负责人确认后发布，已验证两个 HTTPS 页面无需登录即可访问。网页源文件保留在 `store-site`，更新后需同步至网页仓库的 `main` 分支。
+
 ## 本机构建
 
 ```sh
@@ -54,7 +63,7 @@ bash scripts/app-store.sh export
 ## 审核前必须完成
 
 - 免费定价、销售地区、年龄分级与版权信息。
-- 公开可访问的支持和隐私政策页面；页面草稿在 `store-site`，公开联系邮箱需由负责人确认。
+- 在 Apple 后台填写上文已发布的技术支持和隐私政策 URL。
 - 实际商店版的截图、描述，以及审核联系人的电话和邮箱。
 - 核对 App Privacy 声明：本地编辑不上传照片；用户同意后，可选 AI 功能将缩小预览发送给用户配置的服务。服务可能将照片与其 API 账号关联；不能直接声明“完全不收集数据”。
 - 如需审核 AI 功能，提供可供审核使用的服务和凭证，或先与审核团队明确测试方式；不得把个人生产 API Key 放进代码、截图或公开资料。
