@@ -38,6 +38,7 @@ extension AppState {
                 guard self.source?.ci === ci else { return }
                 self.smartMasks.set(type, bitmap)
                 self.redrawTick &+= 1
+                self.scheduleWorkspaceSave()
                 done?()
             } catch {
                 guard let self, self.maskRequestID == id else { return }

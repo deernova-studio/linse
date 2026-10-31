@@ -15,7 +15,7 @@ enum ExportRequestError: LocalizedError {
     }
 }
 
-struct Summary: Equatable {
+struct Summary: Equatable, Codable {
     var source: String
     var secs: Double
     var match: MatchSummary?
@@ -45,7 +45,7 @@ public final class AppState: ObservableObject {
     var maskTask: Task<Void, Never>?
     var maskRequestID: UUID?
 
-    @Published var params = Params() { didSet { paramsDidChange() } }
+    @Published var params = Params() { didSet { paramsDidChange(from: oldValue) } }
     @Published var matched: Params?
     @Published var strength = 100.0
     @Published var summary: Summary?
@@ -81,9 +81,17 @@ public final class AppState: ObservableObject {
     private(set) var presetLoadFailed = false
     let smartMasks = SmartMaskStore()
 
+    var workspaceStore: WorkspaceStore?
+    var workspaceReady = false
+    var workspaceRestoreStarted = false
+    @Published var workspaceRecoveryBlocked = false
+    var workspaceSaveTask: Task<Void, Never>?
+    @Published var workspaceError: String?
+    var manualFields: Set<String> = []
+
     private var suppressEdit = false
     private var histTask: Task<Void, Never>?
-    private var history = EditHistory()
+    var history = EditHistory()
     private var undoTimer: Task<Void, Never>?
 
     public convenience init() {
@@ -98,6 +106,7 @@ public final class AppState: ObservableObject {
                   theme: ThemeMode(rawValue: UserDefaults.standard.string(forKey: "theme") ?? "") ?? .auto,
                   presetStore: PresetStore(url: Self.dataDir.appendingPathComponent("presets.json")),
                   aiConfigurationStore: configurationStore)
+        workspaceStore = WorkspaceStore(directory: Self.dataDir.appendingPathComponent("workspace"))
         loadPresets()
         loadAISettings()
     }
@@ -150,28 +159,29 @@ public final class AppState: ObservableObject {
 
     // MARK: 参数变化
 
-    private func paramsDidChange() {
+    private func paramsDidChange(from previous: Params) {
         redrawTick &+= 1
         scheduleHistogram()
         if !suppressEdit {
-            // 手动改了参数：强度条不再代表当前状态
-            if matched != nil { matched = nil; strength = 100 }
+            if matched != nil { manualFields.formUnion(MatchOverrides.changed(from: previous, to: params)) }
             scheduleUndoCommit()
         }
     }
 
-    private var editSnapshot: EditorSnapshot {
-        EditorSnapshot(params: params, matched: matched, strength: strength, summary: summary)
+    var editSnapshot: EditorSnapshot {
+        EditorSnapshot(params: params, matched: matched, strength: strength, summary: summary, manualFields: manualFields)
     }
 
-    private func restoreEdit(_ snapshot: EditorSnapshot) {
+    func restoreEdit(_ snapshot: EditorSnapshot) {
         suppressEdit = true
         params = snapshot.params
         matched = snapshot.matched
         strength = snapshot.strength
         summary = snapshot.summary
+        manualFields = snapshot.manualFields
         suppressEdit = false
         if let id = selectedMask, !params.masks.contains(where: { $0.id == id }) { selectedMask = nil }
+        scheduleWorkspaceSave()
     }
 
     private func applyEdit(_ snapshot: EditorSnapshot) {
@@ -182,8 +192,8 @@ public final class AppState: ObservableObject {
 
     func setStrength(_ v: Double) {
         guard let m = matched else { return }
-        strength = v
-        var p = Estimator.scaled(m, v / 100)
+        strength = min(150, max(0, v))
+        var p = MatchOverrides.applying(manualFields, values: params, to: Estimator.scaled(m, strength / 100))
         p.masks = params.masks
         suppressEdit = true; params = p; suppressEdit = false
         scheduleUndoCommit()
@@ -204,6 +214,7 @@ public final class AppState: ObservableObject {
         undoTimer?.cancel()
         undoTimer = nil
         history.record(editSnapshot)
+        scheduleWorkspaceSave()
     }
 
     func undoAction() {
@@ -263,11 +274,14 @@ public final class AppState: ObservableObject {
         guard busy == nil else { flash("正在处理，请稍候"); return false }
         busy = "正在导入\(kind.title)…"
         imageImportError = nil
-        defer { busy = nil }
+        defer {
+            busy = nil
+            if kind == .source { refreshSmartMasks() }
+        }
         do {
             let imported = try await decode()
             try Task.checkCancellation()
-            return load(imported.image, name: name, into: kind, metadata: imported.metadata, thumbnail: imported.thumbnail)
+            return load(imported.image, name: name, into: kind, metadata: imported.metadata, thumbnail: imported.thumbnail, originalData: imported.originalData, typeIdentifierHint: imported.typeIdentifierHint)
         } catch is CancellationError { return false }
         catch {
             reportImageImportError(error.localizedDescription)
@@ -281,7 +295,7 @@ public final class AppState: ObservableObject {
     }
 
     @discardableResult
-    func load(_ ci: CIImage, name: String, into kind: SlotKind, metadata: ImageMetadata = ImageMetadata(), thumbnail: CGImage? = nil) -> Bool {
+    func load(_ ci: CIImage, name: String, into kind: SlotKind, metadata: ImageMetadata = ImageMetadata(), thumbnail: CGImage? = nil, originalData: Data? = nil, typeIdentifierHint: String? = nil) -> Bool {
         // 原点挪到 (0,0)，后面的缩放和识别都按这个算
         let ci = ci.transformed(by: CGAffineTransform(translationX: -ci.extent.minX, y: -ci.extent.minY))
         let ext = ci.extent
@@ -295,7 +309,7 @@ public final class AppState: ObservableObject {
             reportImageImportError(ImageImportError.invalidImage.localizedDescription)
             return false
         }
-        let slot = Slot(name: name, ci: ci, size: ext.size, thumb: thumb, metadata: metadata)
+        let slot = Slot(name: name, ci: ci, size: ext.size, thumb: thumb, metadata: metadata, originalData: originalData, typeIdentifierHint: typeIdentifierHint)
         switch kind {
         case .source:
             do {
@@ -306,7 +320,7 @@ public final class AppState: ObservableObject {
             source = slot
             thumbnails = [:]
             smartMasks.reset()
-            refreshSmartMasks()
+            if busy == nil { refreshSmartMasks() }
             redrawTick &+= 1
             scheduleHistogram()
         case .target:
@@ -314,6 +328,7 @@ public final class AppState: ObservableObject {
         }
         history.invalidateMatchSummaries()
         if summary != nil, summary?.source.hasPrefix("预设") == false { summary?.stale = true }
+        scheduleWorkspaceSave()
         return true
     }
 

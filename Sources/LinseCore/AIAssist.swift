@@ -1,11 +1,15 @@
 // 把模型返回的 JSON 变成参数先验，并整理出"AI 判断"说明。模型输出不可信，逐项校验和限幅。和 Electron 版 aiAssist.ts 相同。
 import Foundation
 
-public struct AIAnalysis: Sendable, Equatable {
+public struct AIAnalysis: Sendable, Equatable, Codable {
+    public struct Reason: Sendable, Equatable, Codable {
+        public var slider: String
+        public var why: String
+    }
     public var sourceScene = "", targetScene = "", styleSummary = ""
     public var contentNotStyle: [String] = []
     public var isPortrait: Bool?
-    public var reasons: [(slider: String, why: String)] = []
+    public var reasons: [Reason] = []
     public var prior = Params()
 
     public static func == (lhs: Self, rhs: Self) -> Bool {
@@ -26,7 +30,7 @@ public struct AIAnalysis: Sendable, Equatable {
         for r in ((json["reasons"] as? [Any]) ?? []).prefix(8) {
             guard let o = r as? [String: Any] else { continue }
             let s = str(o["slider"], 20), w = str(o["why"])
-            if !s.isEmpty, !w.isEmpty { reasons.append((s, w)) }
+            if !s.isEmpty, !w.isEmpty { reasons.append(Reason(slider: s, why: w)) }
         }
         prior = Self.toPrior(json["params"] as? [String: Any] ?? [:])
     }

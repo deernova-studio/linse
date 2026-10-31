@@ -15,6 +15,8 @@ struct PanelView: View {
                 if state.matched != nil {
                     SliderRow(label: "匹配强度 %", value: Binding(get: { state.strength }, set: { state.setStrength($0) }), range: 0...150, def: 100)
                         .padding(.horizontal, 14).padding(.vertical, 8)
+                    Text("强度调整未手动修改的参数；手动调整和蒙版保持不变")
+                        .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 14).padding(.bottom, 8)
                     Divider()
                 }
                 PanelSection("基本", changed: basicChanged) { basic }
@@ -27,6 +29,7 @@ struct PanelView: View {
             }
         }
         .scrollIndicators(.automatic)
+        .disabled(state.busy != nil)
     }
 
     var basicChanged: Bool {

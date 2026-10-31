@@ -5,6 +5,40 @@ import XCTest
 
 final class EditHistoryTests: XCTestCase {
     @MainActor
+    func testManualFieldsAndMasksSurviveStrengthChangesAndUndo() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let state = AppState(luts: LutStore(dir: directory))
+        state.load(CIImage(color: .red).cropped(to: CGRect(x: 0, y: 0, width: 8, height: 8)), name: "source", into: .source)
+        var preset = Params()
+        preset.exposure = 2
+        preset.contrast = 40
+        preset.setHSL(.red, HSLValue(hue: 20, sat: 30))
+        state.applyPreset(Preset(id: "test", name: "test", params: preset))
+        state.params.exposure = 3
+        state.params.setHSL(.red, HSLValue(hue: 50, sat: 30))
+        let curve: [CurvePoint] = [[0, 10], [128, 150], [255, 240]]
+        state.params.curves.rgb = curve
+        state.addMask(.linear)
+        let masks = state.params.masks
+        state.commitUndo()
+        state.setStrength(0)
+        XCTAssertEqual(state.params.exposure, 3)
+        XCTAssertEqual(state.params.contrast, 0)
+        XCTAssertEqual(state.params.hslValue(.red).hue, 50)
+        XCTAssertEqual(state.params.hslValue(.red).sat, 0)
+        XCTAssertEqual(state.params.curves.rgb, curve)
+        XCTAssertEqual(state.params.masks, masks)
+        state.undoAction()
+        XCTAssertEqual(state.strength, 100)
+        state.setStrength(150)
+        XCTAssertEqual(state.params.contrast, 60)
+        XCTAssertEqual(state.params.exposure, 3)
+        XCTAssertEqual(state.params.hslValue(.red).sat, 45)
+        XCTAssertEqual(state.params.masks, masks)
+    }
+
+    @MainActor
     func testUndoRedoRestoresStrengthAndResetBaseline() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("linse-history-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -41,12 +75,12 @@ final class EditHistoryTests: XCTestCase {
         params.exposure = 2
         state.applyPreset(Preset(id: "test", name: "test", params: params))
         state.params.exposure = 3
-        XCTAssertNil(state.matched)
+        XCTAssertEqual(state.matched, params)
         state.undoAction()
         XCTAssertEqual(state.matched, params)
         XCTAssertEqual(state.params.exposure, 2)
         state.redoAction()
-        XCTAssertNil(state.matched)
+        XCTAssertEqual(state.matched, params)
         XCTAssertEqual(state.params.exposure, 3)
         state.undoAction()
         state.params.exposure = 4

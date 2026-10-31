@@ -79,8 +79,9 @@ public struct IOSRootView: View {
         .sheet(item: $state.aiPhotoConsent) { AIPhotoConsentView(state: state, request: $0) }
         .sheet(item: $state.inspectedSlot) { ImageInspectionView(state: state, kind: $0) }
         .modifier(ImageImportAlert(state: state))
+        .modifier(WorkspaceAlert(state: state))
         .sheet(item: $share) { ShareSheet(file: $0).ignoresSafeArea() }
-        .task { await state.devAutoload() }
+        .task { await state.restoreWorkspace(); await state.devAutoload() }
     }
 
     var topBar: some View {

@@ -53,7 +53,11 @@ final class AIPhotoConsentTests: XCTestCase {
                 let image = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
                 let properties = try XCTUnwrap(CGImageSourceCopyPropertiesAtIndex(image, 0, nil) as? [String: Any])
                 XCTAssertNil(properties[kCGImagePropertyGPSDictionary as String])
-                XCTAssertNil(properties[kCGImagePropertyExifDictionary as String])
+                // 编码器可生成尺寸和色彩空间字段；原照片的私人 EXIF 不得保留。
+                let exif = properties[kCGImagePropertyExifDictionary as String] as? [String: Any]
+                XCTAssertNil(exif?[kCGImagePropertyExifDateTimeOriginal as String])
+                XCTAssertNil(exif?[kCGImagePropertyExifBodySerialNumber as String])
+                XCTAssertNil(exif?[kCGImagePropertyExifLensSerialNumber as String])
                 let tiff = properties[kCGImagePropertyTIFFDictionary as String] as? [String: Any]
                 XCTAssertNil(tiff?[kCGImagePropertyTIFFModel as String])
                 XCTAssertLessThanOrEqual(properties[kCGImagePropertyPixelWidth as String] as? Int ?? .max, 1024)
@@ -67,7 +71,9 @@ final class AIPhotoConsentTests: XCTestCase {
             .settingProperties([
                 kCGImagePropertyGPSDictionary as String: [kCGImagePropertyGPSLatitude as String: 30.0],
                 kCGImagePropertyTIFFDictionary as String: [kCGImagePropertyTIFFModel as String: "private camera"],
-                kCGImagePropertyExifDictionary as String: [kCGImagePropertyExifDateTimeOriginal as String: "2026:01:01 00:00:00"],
+                kCGImagePropertyExifDictionary as String: [kCGImagePropertyExifDateTimeOriginal as String: "2026:01:01 00:00:00",
+                    kCGImagePropertyExifBodySerialNumber as String: "private-body",
+                    kCGImagePropertyExifLensSerialNumber as String: "private-lens"],
             ])
         state.load(image, name: "private-name.jpg", into: .source)
         state.runMatch(useAI: true)

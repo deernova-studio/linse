@@ -72,7 +72,7 @@ func lumError(_ a: ImageStats, _ b: ImageStats) -> Double {
     zip(a.lumPct, b.lumPct).reduce(0) { $0 + abs($1.0 - $1.1) } / Double(a.lumPct.count)
 }
 
-public struct MatchSummary: Sendable, Equatable {
+public struct MatchSummary: Sendable, Equatable, Codable {
     public var lumBefore = 0.0, lumAfter = 0.0, castBefore = 0.0, castAfter = 0.0
     public var portrait = false
 }

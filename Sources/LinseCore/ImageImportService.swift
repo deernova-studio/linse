@@ -81,7 +81,7 @@ public actor ImageImportService {
         if let rawIdentifier, let ext = UTType(rawIdentifier)?.preferredFilenameExtension {
             metadata.format = ext.uppercased()
         }
-        return ImportedImage(image: image, thumbnail: thumbnail, metadata: metadata)
+        return ImportedImage(originalData: data, typeIdentifierHint: rawIdentifier ?? typeIdentifierHint, image: image, thumbnail: thumbnail, metadata: metadata)
     }
 
     private static let rawTypeIdentifiers = (CGImageSourceCopyTypeIdentifiers() as? [String] ?? [])

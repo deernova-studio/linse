@@ -6,6 +6,31 @@ import XCTest
 
 final class SmartMaskTests: XCTestCase {
     @MainActor
+    func testFileImportRefreshesExistingSmartMaskAfterImportFinishes() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let recognized = expectation(description: "新文件导入后重新识别")
+        let service = SmartMaskService(device: try XCTUnwrap(MTLCreateSystemDefaultDevice())) { _, image, _ in
+            XCTAssertEqual(image.extent.width, 32)
+            recognized.fulfill()
+            return MaskBitmap(id: "new", width: 2, height: 2, data: [255, 0, 0, 255])
+        }
+        let state = AppState(luts: LutStore(dir: directory), maskService: service)
+        state.load(source(width: 16), name: "old", into: .source)
+        state.params.masks = [Mask(type: .sky, index: 1)]
+        state.smartMasks.set(.sky, bitmap("old"))
+        let data = try XCTUnwrap(CIContext().pngRepresentation(of: source(width: 32), format: .RGBA8,
+            colorSpace: CGColorSpace(name: CGColorSpace.sRGB)!))
+        let loaded = await state.load(data: data, name: "new.png", into: .source)
+        XCTAssertTrue(loaded)
+        await state.maskTask?.value
+        await fulfillment(of: [recognized], timeout: 3)
+        XCTAssertEqual(state.smartMasks.maskBitmap(.sky)?.id, "new")
+        XCTAssertNil(state.busy)
+        XCTAssertEqual(state.params.masks.count, 1)
+    }
+
+    @MainActor
     func testOldRecognitionCannotOverwriteNewImageOrClearNewRequest() async throws {
         let oldEntered = expectation(description: "旧照片识别开始")
         let newEntered = expectation(description: "新照片识别开始")

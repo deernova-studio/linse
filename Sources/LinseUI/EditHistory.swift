@@ -1,11 +1,12 @@
 import LinseCore
 
 /// 一次可撤销编辑的完整值；强度依赖 matched，必须与实际参数一起恢复。
-struct EditorSnapshot: Equatable {
+struct EditorSnapshot: Equatable, Codable {
     var params = Params()
     var matched: Params?
     var strength = 100.0
     var summary: Summary?
+    var manualFields: Set<String> = []
 
     func removingLUT(_ id: String) -> Self {
         var result = self
@@ -19,9 +20,11 @@ struct EditorSnapshot: Equatable {
     }
 }
 
-struct EditHistory {
+struct EditHistory: Codable {
     private var entries = [EditorSnapshot()]
     private var index = 0
+
+    var isValid: Bool { !entries.isEmpty && entries.count <= 100 && entries.indices.contains(index) }
 
     mutating func record(_ state: EditorSnapshot) {
         guard entries[index] != state else { return }

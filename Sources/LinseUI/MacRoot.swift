@@ -126,9 +126,10 @@ public struct MacRootView: View {
         .sheet(isPresented: $state.showPrivacyPolicy) { PrivacyPolicyView() }
         .sheet(item: $state.inspectedSlot) { ImageInspectionView(state: state, kind: $0) }
         .modifier(ImageImportAlert(state: state))
+        .modifier(WorkspaceAlert(state: state))
         .onAppear { state.applyTheme() }
         .background(KeyPeek(state: state))
-        .task { await state.devAutoload(); state.devSnapshot() }
+        .task { await state.restoreWorkspace(); await state.devAutoload(); state.devSnapshot() }
     }
 
     private var matchUnavailableReason: String? {

@@ -4,7 +4,7 @@ import CoreImage
 import Foundation
 import Vision
 
-public struct MaskBitmap: Sendable {
+public struct MaskBitmap: Sendable, Codable {
     public let id: String
     public let width: Int, height: Int
     public let data: [UInt8]
