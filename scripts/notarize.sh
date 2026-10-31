@@ -79,8 +79,8 @@ if [ ! -f "$ZIP" ]; then
   mv "$STAGING/app.zip" "$ZIP"
 fi
 notarize "$ZIP" app
-xcrun stapler staple "$APP"
-xcrun stapler validate "$APP"
+bash scripts/notary-ticket.sh xcrun stapler staple "$APP"
+bash scripts/notary-ticket.sh xcrun stapler validate "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
 spctl --assess --type execute --verbose=2 "$APP"
 
@@ -96,8 +96,8 @@ if [ ! -f "$DMG" ]; then
   mv "$STAGING/$DMG_NAME" "$DMG"
 fi
 notarize "$DMG" dmg
-xcrun stapler staple "$DMG"
-xcrun stapler validate "$DMG"
+bash scripts/notary-ticket.sh xcrun stapler staple "$DMG"
+bash scripts/notary-ticket.sh xcrun stapler validate "$DMG"
 hdiutil verify "$DMG"
 spctl --assess --type open --context context:primary-signature --verbose=2 "$DMG"
 
