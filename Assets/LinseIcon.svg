@@ -1,13 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <title>Linse — Overlapping Tones</title>
-  <desc>A white outline and a light gray circle overlap on a black field.</desc>
+  <desc>A black outline and a black circle overlap in gray on a white field.</desc>
   <defs>
     <clipPath id="left-circle">
       <circle cx="398" cy="512" r="283"/>
     </clipPath>
   </defs>
-  <rect width="1024" height="1024" fill="#141414"/>
-  <circle cx="636" cy="512" r="283" fill="#bdbdbd"/>
-  <circle cx="636" cy="512" r="283" fill="#515151" clip-path="url(#left-circle)"/>
-  <circle cx="398" cy="512" r="283" fill="none" stroke="#fafafa" stroke-width="44"/>
+  <rect width="1024" height="1024" fill="#ffffff"/>
+  <circle cx="636" cy="512" r="283" fill="#111111"/>
+  <circle cx="636" cy="512" r="283" fill="#989898" clip-path="url(#left-circle)"/>
+  <circle cx="398" cy="512" r="283" fill="none" stroke="#111111" stroke-width="44"/>
 </svg>
