@@ -3,11 +3,11 @@
   <desc>A black outline and a black circle overlap in gray on a white field.</desc>
   <defs>
     <clipPath id="left-circle">
-      <circle cx="398" cy="512" r="283"/>
+      <circle cx="398" cy="512" r="268"/>
     </clipPath>
   </defs>
   <rect width="1024" height="1024" fill="#ffffff"/>
   <circle cx="636" cy="512" r="283" fill="#111111"/>
   <circle cx="636" cy="512" r="283" fill="#989898" clip-path="url(#left-circle)"/>
-  <circle cx="398" cy="512" r="283" fill="none" stroke="#111111" stroke-width="44"/>
+  <circle cx="398" cy="512" r="268" fill="none" stroke="#111111" stroke-width="30"/>
 </svg>
