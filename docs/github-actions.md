@@ -62,7 +62,7 @@ App 专用密码可使用有效的已有密码，也可在 [Apple 账号](https:
 
 ## 发布时的验证范围
 
-手动发布使用 GitHub 托管的 Apple Silicon macOS 15 和 Xcode 16.4，编译 Mac arm64 Release 和 iOS 共享代码。具有 Metal GPU 时运行 3 条真实导入、匹配、导出流程冒烟；无 GPU 时明确记录为未执行，不算通过。
+手动发布使用 GitHub 托管的 Apple Silicon macOS 15 和 Xcode 26.3，编译 Mac arm64 Release 和 iOS 共享代码。具有 Metal GPU 时运行 3 条真实导入、匹配、导出流程冒烟。无 GPU 时会记录未执行的用例。
 
 仅维护 [8 条关键冒烟用例](smoke.md)，不使用单测框架或测试 target。剩余 5 条人工流程以及 RAW、iPhone / iPad 运行情况需单独验收；共享代码编译不代表设备或模拟器运行通过。
 
