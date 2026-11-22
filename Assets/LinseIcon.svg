@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <title>Linse — Tone Print</title>
+  <desc>A black and graphite photo print divided by a white tone curve.</desc>
+  <defs>
+    <clipPath id="print">
+      <rect x="178" y="225" width="668" height="574" rx="112"/>
+    </clipPath>
+  </defs>
+  <path fill="#fafafa" d="M0 0h1024v1024H0z"/>
+  <g clip-path="url(#print)">
+    <path fill="#4d4d4d" d="M178 225h668v574H178z"/>
+    <path fill="#111111" d="M158 205h708v194H649c-145 0-134 226-279 226H158z"/>
+    <path fill="none" stroke="#fafafa" stroke-width="58"
+          d="M158 625h212c145 0 134-226 279-226h217"/>
+  </g>
+</svg>
