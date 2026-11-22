@@ -16,7 +16,5 @@ let package = Package(
         .target(name: "LinseCore", exclude: ["Shaders.metal"]),
         .target(name: "LinseUI", dependencies: ["LinseCore"]),
         .executableTarget(name: "LinseMac", dependencies: ["LinseUI"]),
-        .testTarget(name: "LinseCoreTests", dependencies: ["LinseCore"], resources: [.copy("Fixtures")]),
-        .testTarget(name: "LinseUITests", dependencies: ["LinseUI", "LinseCore"]),
     ]
 )

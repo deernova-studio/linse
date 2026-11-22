@@ -9,7 +9,7 @@ struct ImageDetailsView: View {
                 Text("图片详情").font(.headline)
                 ForEach(details) { detail in
                     VStack(alignment: .leading, spacing: 5) {
-                        Text(detail.label).font(.subheadline).foregroundStyle(.secondary)
+                        Text(detail.label).font(.subheadline).foregroundStyle(Color.inkSecondary)
                         Text(verbatim: detail.value).font(.callout)
                             .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
                     }

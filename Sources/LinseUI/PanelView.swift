@@ -16,7 +16,7 @@ struct PanelView: View {
                     SliderRow(label: "匹配强度 %", value: Binding(get: { state.strength }, set: { state.setStrength($0) }), range: 0...150, def: 100)
                         .padding(.horizontal, 14).padding(.vertical, 8)
                     Text("强度调整未手动修改的参数；手动调整和蒙版保持不变")
-                        .font(.caption).foregroundStyle(.secondary).padding(.horizontal, 14).padding(.bottom, 8)
+                        .font(.caption).foregroundStyle(Color.inkSecondary).padding(.horizontal, 14).padding(.bottom, 8)
                     Divider()
                 }
                 PanelSection("基本", changed: basicChanged) { basic }
@@ -28,6 +28,7 @@ struct PanelView: View {
                 PanelSection("蒙版", changed: !state.params.masks.isEmpty) { MaskPanel(state: state) }
             }
         }
+        .background(Color.surface)
         .scrollIndicators(.automatic)
         .disabled(state.busy != nil)
     }
@@ -51,8 +52,8 @@ struct PanelView: View {
 
     @ViewBuilder var basic: some View {
         GroupTitle("白平衡")
-        SliderRow(label: "色温", value: b(\.temperature), range: -100...100, track: [.blue, .gray, .yellow])
-        SliderRow(label: "色调", value: b(\.tint), range: -100...100, track: [.green, .gray, .purple])
+        SliderRow(label: "色温", value: b(\.temperature), range: -100...100)
+        SliderRow(label: "色调", value: b(\.tint), range: -100...100)
         GroupTitle("色调")
         SliderRow(label: "曝光", value: b(\.exposure), range: -5...5, step: 0.01, digits: 2)
         SliderRow(label: "对比度", value: b(\.contrast), range: -100...100)
@@ -78,7 +79,7 @@ struct PanelView: View {
         CurveEditor(points: Binding(get: { state.params.curves[keyPath: Curves.channels[curveChannel]] },
                                     set: { state.params.curves[keyPath: Curves.channels[curveChannel]] = $0 }),
                     others: Curves.channels.enumerated().filter { $0.offset != curveChannel }.map { state.params.curves[keyPath: $0.element] },
-                    color: [Color.primary, .red, .green, .blue][curveChannel])
+                    color: [Color.ink, .red, .green, .blue][curveChannel])
             .aspectRatio(1, contentMode: .fit)
             .help("点击添加控制点，拖动调整，双击删除")
     }
@@ -92,20 +93,16 @@ struct PanelView: View {
             SliderRow(label: band.label, value: Binding(
                 get: { let v = state.params.hslValue(band); return [v.hue, v.sat, v.lum][hslTab] },
                 set: { nv in var v = state.params.hslValue(band); if hslTab == 0 { v.hue = nv } else if hslTab == 1 { v.sat = nv } else { v.lum = nv }; state.params.setHSL(band, v) }),
-                range: -100...100, track: [.gray, bandColor(band)])
+                range: -100...100)
         }
     }
 
-    func bandColor(_ b: HSLBand) -> Color {
-        Color(hue: [0, 30, 55, 120, 180, 225, 270, 310][b.rawValue] / 360, saturation: 0.75, brightness: 0.85)
-    }
 
     @ViewBuilder var grading: some View {
         ForEach(Array([("阴影", \Grading.shadows), ("中间调", \Grading.midtones), ("高光", \Grading.highlights)].enumerated()), id: \.offset) { _, item in
             let (name, kp) = item
             GroupTitle(name)
-            SliderRow(label: "色相", value: Binding(get: { state.params.grading[keyPath: kp].hue }, set: { state.params.grading[keyPath: kp].hue = $0 }), range: 0...360,
-                      track: [.red, .yellow, .green, .cyan, .blue, .purple, .red])
+            SliderRow(label: "色相", value: Binding(get: { state.params.grading[keyPath: kp].hue }, set: { state.params.grading[keyPath: kp].hue = $0 }), range: 0...360)
             SliderRow(label: "饱和度", value: Binding(get: { state.params.grading[keyPath: kp].sat }, set: { state.params.grading[keyPath: kp].sat = $0 }), range: 0...100)
             SliderRow(label: "明亮度", value: Binding(get: { state.params.grading[keyPath: kp].lum }, set: { state.params.grading[keyPath: kp].lum = $0 }), range: -100...100)
         }
@@ -156,7 +153,7 @@ struct MaskPanel: View {
                 HStack(spacing: 6) {
                     ForEach(row, id: \.self) { t in
                         Button { state.addMask(t) } label: {
-                            Label(t.label, systemImage: t.isSmart ? "wand.and.stars" : "plus").font(.system(size: 11)).frame(maxWidth: .infinity)
+                            Label(t.label, systemImage: t.isSmart ? "wand.and.stars" : "plus").font(AppTypography.ui(11)).frame(maxWidth: .infinity)
                         }
                         .controlSize(.small).disabled(state.params.masks.count >= Params.maxMasks || state.busy != nil)
                         .help(t.isSmart ? "自动识别\(t.label)" : "")
@@ -169,14 +166,14 @@ struct MaskPanel: View {
             let on = m.id == state.selectedMask
             HStack(spacing: 8) {
                 Toggle("", isOn: Binding(get: { m.enabled }, set: { v in update(m.id) { $0.enabled = v } })).labelsHidden().controlSize(.mini).help("启用")
-                Text(m.name).font(.system(size: 12)).foregroundStyle(on ? .primary : .secondary)
+                Text(m.name).font(AppTypography.ui(12)).foregroundStyle(on ? Color.ink : Color.inkSecondary)
                 Spacer()
                 Button("删除蒙版", systemImage: "xmark") { state.deleteMask(m.id) }
-                    .labelStyle(.iconOnly).font(.system(size: 9))
-                    .buttonStyle(NeutralButtonStyle()).foregroundStyle(.secondary).help("删除")
+                    .labelStyle(.iconOnly).font(AppTypography.ui(9))
+                    .buttonStyle(IconButtonStyle()).foregroundStyle(Color.inkSecondary).help("删除")
             }
-            .padding(.horizontal, 8).frame(height: 26)
-            .overlay(Rectangle().stroke(Color.primary.opacity(on ? 0.5 : 0.12), lineWidth: 1))
+            .padding(.horizontal, 8).frame(minHeight: AppMetrics.rowHeight)
+            .overlay(Rectangle().stroke(on ? Color.ink : Color.lineControl, lineWidth: 1))
             .contentShape(Rectangle())
             .modifier(ControlFeedback(cornerRadius: 0))
             .onTapGesture { state.selectedMask = on ? nil : m.id }
@@ -188,7 +185,7 @@ struct MaskPanel: View {
                 Toggle("显示蒙版叠加", isOn: $state.showMaskOverlay)
                 Toggle("反相", isOn: Binding(get: { m.invert }, set: { v in update(m.id) { $0.invert = v } }))
             }
-            .font(.system(size: 11)).controlSize(.small).padding(.top, 6)
+            .font(AppTypography.ui(11)).controlSize(.small).padding(.top, 6)
             GroupTitle("范围")
             switch m.type {
             case .radial:
@@ -236,6 +233,7 @@ struct MaskPanel: View {
 struct PanelSection<Content: View>: View {
     let title: String, changed: Bool
     @ViewBuilder let content: Content
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var open = true
     init(_ title: String, changed: Bool, @ViewBuilder content: () -> Content) {
         self.title = title; self.changed = changed; self.content = content()
@@ -245,18 +243,18 @@ struct PanelSection<Content: View>: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button { withAnimation(.easeOut(duration: 0.15)) { open.toggle() } } label: {
+            Button { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { open.toggle() } } label: {
                 HStack {
-                    Text(title).font(AppTypography.sectionTitle).foregroundStyle(.primary)
+                    Text(title).font(AppTypography.sectionTitle).foregroundStyle(Color.ink)
                     Spacer()
-                    if changed { Circle().fill(Color.primary).frame(width: 4, height: 4) }
-                    Image(systemName: "chevron.down").font(.system(size: 10)).rotationEffect(.degrees(open ? 0 : -90)).foregroundStyle(.secondary)
+                    if changed { Circle().fill(Color.ink).frame(width: 4, height: 4) }
+                    Image(systemName: "chevron.down").font(AppTypography.ui(10)).rotationEffect(.degrees(open ? 0 : -90)).foregroundStyle(Color.inkSecondary)
                 }
-                .padding(.horizontal, 14).padding(.vertical, 11).contentShape(Rectangle())
+                .padding(.horizontal, Deernova.space3).frame(minHeight: Deernova.toolbarHeight).contentShape(Rectangle())
             }
-            .buttonStyle(NeutralButtonStyle(cornerRadius: 0))
+            .buttonStyle(SurfaceButtonStyle())
             if open { VStack(alignment: .leading, spacing: 2) { content }.padding(.horizontal, 14).padding(.bottom, 14) }
-            Divider()
+            PaperDivider()
         }
     }
 }
@@ -264,7 +262,7 @@ struct PanelSection<Content: View>: View {
 struct GroupTitle: View {
     let t: String
     init(_ t: String) { self.t = t }
-    var body: some View { Text(t).font(AppTypography.groupTitle).foregroundStyle(.secondary).padding(.top, 10).padding(.bottom, 2) }
+    var body: some View { Text(t).font(AppTypography.groupTitle).foregroundStyle(Color.inkSecondary).padding(.top, 10).padding(.bottom, 2) }
 }
 
 struct TabText: View {
@@ -272,11 +270,11 @@ struct TabText: View {
     init(_ t: String, on: Bool, action: @escaping () -> Void) { self.t = t; self.on = on; self.action = action }
     var body: some View {
         Button(action: action) {
-            Text(t).font(AppTypography.tab).foregroundStyle(on ? .primary : .secondary)
-                .padding(.horizontal, 8).padding(.vertical, 3)
+            Text(t).font(AppTypography.tab).foregroundStyle(on ? Color.ink : Color.inkSecondary)
+                .padding(.horizontal, Deernova.space1)
                 .overlay(alignment: .bottom) { if on { Rectangle().frame(height: 1) } }
         }
-        .buttonStyle(NeutralButtonStyle())
+        .buttonStyle(NeutralButtonStyle(selected: on))
     }
 }
 
@@ -288,52 +286,58 @@ struct SliderRow: View {
     var step: Double = 1
     var digits = 0
     var def: Double = 0
-    var track: [Color]? = nil
 
     var body: some View {
-        HStack(spacing: 10) {
-            Text(label).font(.system(size: 12)).foregroundStyle(value != def ? .primary : .secondary).frame(width: 68, alignment: .leading)
-                .lineLimit(1).onTapGesture(count: 2) { value = def }.help("双击复位")
-            ThinSlider(value: $value, range: range, step: step, def: def, track: track)
-            TextField("", value: $value, format: .number.precision(.fractionLength(digits)))
-                .textFieldStyle(.plain).multilineTextAlignment(.trailing).font(.system(size: 12).monospacedDigit())
-                .foregroundStyle(value != def ? .primary : .secondary).frame(width: 46)
-        }
-        .frame(height: 22)
-    }
-}
-
-/// 极简细线滑块：1px 轨道 + 空心圆点，可带颜色渐变
-struct ThinSlider: View {
-    @Binding var value: Double
-    let range: ClosedRange<Double>
-    let step: Double, def: Double
-    let track: [Color]?
-    @State private var hover = false
-
-    var body: some View {
-        GeometryReader { g in
-            let w = g.size.width
-            let t = (value - range.lowerBound) / (range.upperBound - range.lowerBound)
-            ZStack(alignment: .leading) {
-                Rectangle()
-                    .fill(track.map { AnyShapeStyle(LinearGradient(colors: $0, startPoint: .leading, endPoint: .trailing)) } ?? AnyShapeStyle(Color.primary.opacity(0.22)))
-                    .frame(height: 1)
-                Circle().strokeBorder(Color.primary, lineWidth: 1).background(Circle().fill(hover ? Color.primary : Color.appBackground))
-                    .frame(width: 10, height: 10)
-                    .offset(x: CGFloat(t) * (w - 10))
+        #if os(iOS)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(label).font(AppTypography.ui(13)).fixedSize(horizontal: false, vertical: true)
+                Spacer()
+                numberField.frame(minWidth: 64)
             }
-            .frame(maxHeight: .infinity)
-            .contentShape(Rectangle())
-            .gesture(DragGesture(minimumDistance: 0).onChanged { g in
-                let x = min(1, max(0, (g.location.x - 5) / (w - 10)))
-                let raw = range.lowerBound + Double(x) * (range.upperBound - range.lowerBound)
-                value = (raw / step).rounded() * step
-            })
-            .simultaneousGesture(TapGesture(count: 2).onEnded { value = def })
-            .onHover { hover = $0 }
+            slider.frame(minHeight: AppMetrics.controlHeight)
         }
-        .frame(height: 16)
+        .padding(.vertical, 4)
+        #else
+        HStack(spacing: 8) {
+            Text(label).font(AppTypography.ui(13)).frame(width: 78, alignment: .leading)
+                .onTapGesture(count: 2) { value = def }.help("双击复位")
+            slider
+            numberField.frame(width: 52)
+        }
+        .frame(minHeight: AppMetrics.rowHeight)
+        #endif
+    }
+
+    private var slider: some View {
+        // Keep native interaction without hundreds of macOS tick marks.
+        // Quantize the binding instead of asking Slider to draw discrete steps.
+        Slider(value: Binding(get: { value }, set: { setSliderValue($0) }), in: range)
+            .tint(Color.brandAccent)
+            .accessibilityLabel(label)
+            .accessibilityValue(value.formatted(.number.precision(.fractionLength(digits))))
+            .accessibilityAdjustableAction { direction in
+                switch direction {
+                case .increment: setSliderValue(value + step)
+                case .decrement: setSliderValue(value - step)
+                @unknown default: break
+                }
+            }
+            .contextMenu { Button("复位\(label)") { value = def } }
+    }
+
+    private func setSliderValue(_ proposed: Double) {
+        let rounded = (proposed / step).rounded() * step
+        value = min(range.upperBound, max(range.lowerBound, rounded))
+    }
+
+    private var numberField: some View {
+        TextField(label, value: $value, format: .number.precision(.fractionLength(digits)))
+            .textFieldStyle(.roundedBorder)
+            .multilineTextAlignment(.trailing)
+            .font(AppTypography.ui(13).monospacedDigit())
+            .accessibilityLabel("\(label)数值")
+            .onSubmit { value = value.isFinite ? min(range.upperBound, max(range.lowerBound, value)) : def }
     }
 }
 

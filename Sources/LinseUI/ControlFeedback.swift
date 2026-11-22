@@ -1,26 +1,22 @@
 import SwiftUI
 
-/// 自定义控件共用的中性反馈；不改变内容布局，也不覆盖原生输入控件的交互。
+/// A single fill for hover, press or selection; native focus indication is retained.
 struct ControlFeedback: ViewModifier {
     var isPressed = false
-    var cornerRadius: CGFloat = 4
-    var outlined = false
+    var isSelected = false
+    var cornerRadius: CGFloat = Deernova.buttonRadius
     @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hovered = false
 
     func body(content: Content) -> some View {
-        let active = isEnabled && (hovered || isPressed)
-        let shape = RoundedRectangle(cornerRadius: cornerRadius)
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
         content
-            .background(Color.primary.opacity(isEnabled ? (isPressed ? 0.12 : hovered ? 0.06 : 0) : 0), in: shape)
-            .overlay {
-                if outlined {
-                    shape.strokeBorder(Color.primary.opacity(active ? 0.4 : 0), lineWidth: 1)
-                        .allowsHitTesting(false)
-                }
-            }
+            .background(isEnabled ? (isPressed || isSelected ? Color.fillSelected : hovered ? Color.fillHover : .clear) : .clear, in: shape)
             .contentShape(shape)
-            .opacity(isEnabled ? 1 : 0.45)
-            .onHover { hovered = $0 }
+            .opacity(isEnabled ? 1 : Deernova.opacityDisabled)
+            .animation(reduceMotion ? nil : .easeOut(duration: Deernova.durationInstant), value: hovered)
+            .onHover { hovered = $0 && isEnabled }
+            .onChange(of: isEnabled) { _, enabled in if !enabled { hovered = false } }
     }
 }

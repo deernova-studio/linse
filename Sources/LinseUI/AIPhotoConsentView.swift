@@ -14,19 +14,22 @@ struct AIPhotoConsentView: View {
                 .textSelection(.enabled)
                 .fixedSize(horizontal: false, vertical: true)
             Text("不发送原始文件或照片中的位置、相机等元数据。服务提供方将按其隐私政策处理图片，可能产生 API 费用。")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(.callout).foregroundStyle(Color.inkSecondary)
             Text("取消后仍可使用离线的「计算匹配」。")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(.callout).foregroundStyle(Color.inkSecondary)
             HStack {
                 Button("隐私说明") { showPrivacy = true }
                 Spacer()
                 Button("取消") { state.aiPhotoConsent = nil }
                     .keyboardShortcut(.cancelAction)
                 Button("同意并分析") { state.confirmAIPhotoConsent(request.id) }
+                    .keyboardShortcut(.defaultAction).grayscale(1)
             }
-            .buttonStyle(NeutralButtonStyle(outlined: true))
+            .controlSize(.regular)
         }
         .padding(24)
+        .tint(Color.brandAccent)
+        .accentColor(Color.brandAccent)
         #if os(macOS)
         .frame(width: 460)
         #endif

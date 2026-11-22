@@ -26,17 +26,7 @@ struct AISettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("AI 设置").font(.system(size: 13, weight: .medium))
-                Spacer()
-                Button { dismiss() } label: {
-                    Label("关闭 AI 设置", systemImage: "xmark")
-                        .labelStyle(.iconOnly).font(.system(size: 11, weight: .light))
-                        .frame(width: 44, height: 44)
-                }
-                .buttonStyle(NeutralButtonStyle()).keyboardShortcut(.cancelAction)
-            }
-            .padding(.leading, 22).padding(.trailing, 8).padding(.vertical, 6)
+            SheetHeader(title: "AI 设置", closeLabel: "关闭 AI 设置") { dismiss() }
             Divider()
             VStack(alignment: .leading, spacing: 18) {
                 field("接口协议") {
@@ -44,7 +34,7 @@ struct AISettingsView: View {
                         Text("OpenAI").tag(AIProtocol.openai)
                         Text("Anthropic").tag(AIProtocol.anthropic)
                     }
-                    .pickerStyle(.segmented).labelsHidden()
+                    .pickerStyle(.segmented).labelsHidden().grayscale(1)
                 }
                 field("Base URL", hint: urlHint, warn: true) {
                     LineField {
@@ -60,8 +50,8 @@ struct AISettingsView: View {
                             else { SecureField(state.aiHasKey ? "已保存 · 留空不修改" : "sk-…", text: $key) }
                         }
                         Button(showKey ? "隐藏 API Key" : "显示 API Key", systemImage: showKey ? "eye.slash" : "eye") { showKey.toggle() }
-                            .labelStyle(.iconOnly).font(.system(size: 11))
-                            .buttonStyle(NeutralButtonStyle()).foregroundStyle(.secondary)
+                            .labelStyle(.iconOnly).font(AppTypography.ui(11))
+                            .buttonStyle(IconButtonStyle()).foregroundStyle(Color.inkSecondary)
                     }
                     if state.aiHasKey {
                         Button("清除已保存的 API Key") { confirmClearKey = true }
@@ -86,23 +76,24 @@ struct AISettingsView: View {
                 }
                 field("思考强度") {
                     Picker("思考强度", selection: $s.effort) { ForEach(Self.efforts, id: \.0) { Text($0.1).tag($0.0) } }
-                        .pickerStyle(.segmented).labelsHidden()
+                        .pickerStyle(.segmented).labelsHidden().grayscale(1)
                         .help(s.proto == .openai ? "作为 reasoning_effort 传递，很多模型只认 低 / 中 / 高" : "作为 effort 传递")
                 }
-                HStack(spacing: 10) {
+                HStack(spacing: Deernova.space2) {
                     Text("快速模式").font(.callout)
-                    Spacer()
-                    Text("可能增加费用").font(.subheadline).foregroundStyle(.secondary)
                     Toggle("快速模式", isOn: $s.fast)
-                        .labelsHidden().toggleStyle(.switch).controlSize(.small)
+                        .labelsHidden().toggleStyle(.switch).controlSize(.small).tint(Color.success)
+                        .fixedSize()
                         .help("优先处理请求，需当前服务和模型支持。")
+                    Spacer()
                 }
             }
-            .padding(22)
+            .padding(Deernova.space5)
+            .background(Color.surface)
             Divider()
             VStack(alignment: .leading, spacing: 12) {
                 if !test.isEmpty {
-                    Text(test).font(.callout).foregroundStyle(testOK ? Color.green : Color.orange)
+                    Text(test).font(.callout).foregroundStyle(testOK ? Color.success : Color.warning)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
@@ -111,12 +102,14 @@ struct AISettingsView: View {
                     Button("隐私说明") { showPrivacy = true }
                     Spacer()
                     Button("取消") { dismiss() }
-                    Button("保存") { save() }.keyboardShortcut(.defaultAction)
+                    Button("保存") { save() }.keyboardShortcut(.defaultAction).grayscale(1)
                 }
             }
             .controlSize(.regular)
-            .padding(.horizontal, 22).padding(.vertical, 14)
+            .padding(.horizontal, Deernova.space5).padding(.vertical, Deernova.space3)
         }
+        .tint(Color.brandAccent)
+        .accentColor(Color.brandAccent)
         #if os(macOS)
         .frame(width: 480)
         #else
@@ -149,9 +142,9 @@ struct AISettingsView: View {
 
     func field<C: View>(_ title: String, hint: String = "", warn: Bool = false, @ViewBuilder _ c: () -> C) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(title).font(.system(size: 10.5)).kerning(1.2).foregroundStyle(.secondary)
+            Text(title).font(.caption).foregroundStyle(Color.inkSecondary)
             c()
-            if !hint.isEmpty { Text(hint).font(.system(size: 10.5)).foregroundStyle(warn ? .orange : .secondary) }
+            if !hint.isEmpty { Text(hint).font(AppTypography.ui(10.5)).foregroundStyle(warn ? Color.warning : Color.inkSecondary) }
         }
     }
 
@@ -225,8 +218,8 @@ struct LineField<C: View>: View {
     @ViewBuilder let content: C
     var body: some View {
         HStack(spacing: 6) { content }
-            .textFieldStyle(.plain).font(.system(size: 12.5))
-            .padding(.vertical, 5)
-            .overlay(alignment: .bottom) { Rectangle().fill(Color.primary.opacity(0.25)).frame(height: 1) }
+            .textFieldStyle(.plain).font(AppTypography.ui(12.5))
+            .frame(minHeight: Deernova.fieldHeight)
+            .overlay(alignment: .bottom) { Rectangle().fill(Color.lineControl).frame(height: 1) }
     }
 }

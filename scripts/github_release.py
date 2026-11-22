@@ -114,8 +114,12 @@ class GitHub:
 
 
 def preflight(api, release):
-    if api.request("GET", "").get("private") is not True:
-        raise ReleaseError("此发布流程只允许发布到私有仓库。")
+    official_repository = "deernova-studio/linse"
+    if release.repository.casefold() != official_repository:
+        raise ReleaseError("此发布流程只允许发布到 deernova-studio/linse。")
+    metadata = api.request("GET", "")
+    if metadata.get("full_name", "").casefold() != official_repository or metadata.get("fork") is not False:
+        raise ReleaseError("GitHub 返回的仓库不是临色的正式发布仓库。")
     existing = next((item for item in api.releases() if item["tag_name"] == release.tag), None)
     if existing:
         if not existing["draft"]:

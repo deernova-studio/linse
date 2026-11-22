@@ -5,16 +5,7 @@ struct PrivacyPolicyView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("隐私说明").font(.headline)
-                Spacer()
-                Button("关闭", systemImage: "xmark") { dismiss() }
-                    .labelStyle(.iconOnly)
-                    .frame(width: 44, height: 44)
-                    .buttonStyle(NeutralButtonStyle())
-                    .keyboardShortcut(.cancelAction)
-            }
-            .padding(.leading, 24).padding(.trailing, 8)
+            SheetHeader(title: "隐私说明", closeLabel: "关闭隐私说明") { dismiss() }
             Divider()
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
@@ -33,8 +24,11 @@ struct PrivacyPolicyView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(24)
                 .textSelection(.enabled)
+                .background(Color.surface)
             }
         }
+        .tint(Color.brandAccent)
+        .accentColor(Color.brandAccent)
         #if os(macOS)
         .frame(width: 540, height: 560)
         #endif

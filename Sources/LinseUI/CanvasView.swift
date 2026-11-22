@@ -66,13 +66,22 @@ struct CanvasView: PlatformViewRepresentable {
         func draw(in view: MTKView) {
             guard let drawable = view.currentDrawable, let cb = state.display.makeCommandBuffer() else { return }
             #if os(macOS)
-            let dark = view.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             let scale = view.window?.backingScaleFactor ?? 2
             #else
-            let dark = view.traitCollection.userInterfaceStyle == .dark
             let scale = view.contentScaleFactor
             #endif
-            let bg = dark ? MTLClearColor(red: 0.055, green: 0.055, blue: 0.06, alpha: 1) : MTLClearColor(red: 0.957, green: 0.957, blue: 0.965, alpha: 1)
+            // Match the opaque Deernova canvas using its sRGB components.
+            #if os(macOS)
+            var paper = NSColor.black
+            view.effectiveAppearance.performAsCurrentDrawingAppearance {
+                paper = NSColor(Color.canvas).usingColorSpace(.sRGB)!
+            }
+            let bg = MTLClearColor(red: paper.redComponent, green: paper.greenComponent, blue: paper.blueComponent, alpha: 1)
+            #else
+            var red: CGFloat = 0, green: CGFloat = 0, blue: CGFloat = 0, alpha: CGFloat = 0
+            UIColor(Color.canvas).resolvedColor(with: view.traitCollection).getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+            let bg = MTLClearColor(red: red, green: green, blue: blue, alpha: 1)
+            #endif
             let target = drawable.texture
             let fit = Self.fitRect(image: state.display.imageSize, in: CGSize(width: target.width, height: target.height), inset: state.canvasInset * scale)
             // 先清屏
@@ -131,7 +140,7 @@ struct StageView: View {
                     Rectangle().fill(.white).frame(width: 1, height: fit.height)
                         .shadow(color: .black.opacity(0.4), radius: 0.5)
                         .position(x: x, y: fit.midY)
-                    Text("原图  |  结果").font(.system(size: 10.5)).foregroundStyle(.secondary)
+                    Text("原图  |  结果").font(AppTypography.ui(10.5)).foregroundStyle(Color.inkSecondary)
                         .padding(.horizontal, 8).padding(.vertical, 2).background(.ultraThinMaterial)
                         .position(x: x, y: fit.minY + 14)
                     Color.clear.contentShape(Rectangle()).frame(width: 24, height: fit.height).position(x: x, y: fit.midY)
@@ -140,16 +149,16 @@ struct StageView: View {
                 }
                 if dropTarget {
                     RoundedRectangle(cornerRadius: 2).stroke(style: StrokeStyle(lineWidth: 1, dash: [4])).padding(12)
-                    Text(state.source != nil && state.target == nil ? "松开导入为目标风格" : "松开导入为原图").font(.system(size: 13))
+                    Text(state.source != nil && state.target == nil ? "松开导入为目标风格" : "松开导入为原图").font(AppTypography.ui(13))
                 }
                 if let b = state.busy {
-                    Color.black.opacity(0.35)
+                    Color.scrim
                     VStack(spacing: 12) {
                         ProgressView().controlSize(.small)
-                        Text(b).font(.system(size: 12)).multilineTextAlignment(.center)
+                        Text(b).font(AppTypography.ui(12)).multilineTextAlignment(.center)
                         if state.canCancel { Button("取消") { state.cancelBusy() }.controlSize(.small).keyboardShortcut(.cancelAction) }
                     }
-                        .padding(18).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+                        .padding(18).background(Color.surfaceRaised, in: RoundedRectangle(cornerRadius: Deernova.cardRadius))
                 }
             }
             .onChange(of: state.split) { state.redrawTick &+= 1 }
@@ -206,38 +215,35 @@ struct MaskHandle: View {
 struct EmptyGuide: View {
     @ObservedObject var state: AppState
     var body: some View {
-        HStack(spacing: 0) {
-            step(1, "导入你的照片", "⌘ O") { state.open(.source) }
-            Divider()
-            step(2, "导入目标风格", "⇧ ⌘ O") { state.open(.target) }
-            Divider()
-            step(3, "匹配", "⌘ ↩") { state.runMatch() }
+        ScrollView {
+            VStack(spacing: 16) {
+                Image(systemName: "photo.on.rectangle.angled")
+                    .font(.system(size: 28, weight: .light)).foregroundStyle(Color.inkTertiary)
+                    .accessibilityHidden(true)
+                Text("从参考照片开始调色").font(AppTypography.guideTitle)
+                    .foregroundStyle(Color.ink).multilineTextAlignment(.center)
+                Text("先导入原图，再选择喜欢的参考图，匹配色彩后继续微调。")
+                    .font(AppTypography.ui(13)).foregroundStyle(Color.inkSecondary)
+                    .multilineTextAlignment(.center).frame(maxWidth: 320)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 12) { importActions }
+                    VStack(spacing: 8) { importActions }
+                }
+            }
+            .padding(24)
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxWidth: 720, maxHeight: 140)
-        .overlay(Rectangle().stroke(Color.primary.opacity(0.12), lineWidth: 1))
-        .padding(32)
+        .defaultScrollAnchor(.center)
+        .frame(maxWidth: 600)
     }
 
-    func step(_ n: Int, _ title: String, _ key: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("\(n)").font(AppTypography.groupTitle).monospacedDigit()
-                    .foregroundStyle(.secondary).frame(width: 18, height: 18)
-                    .overlay(Circle().stroke(Color.primary.opacity(0.18)))
-                    .accessibilityHidden(true)
-                Text(title).font(AppTypography.guideTitle).lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text(key).font(AppTypography.shortcut).foregroundStyle(.secondary)
-                    .padding(.horizontal, 6).padding(.vertical, 3)
-                    .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 4))
-                    .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.primary.opacity(0.12), lineWidth: 0.5))
-                    .fixedSize().accessibilityHidden(true)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-            .padding(24)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(NeutralButtonStyle(cornerRadius: 0))
-        .help("\(title)（\(key)）")
+    @ViewBuilder private var importActions: some View {
+        Button("导入原图", systemImage: "plus") { state.open(.source) }
+            // Native buttons own foreground contrast, including inactive-window
+            // fills where AppKit deliberately does not use the requested tint.
+            .buttonStyle(.borderedProminent).tint(Color.brandAccent)
+            .controlSize(.large)
+        Button("选择参考图") { state.open(.target) }
+            .buttonStyle(.bordered).controlSize(.large)
     }
 }

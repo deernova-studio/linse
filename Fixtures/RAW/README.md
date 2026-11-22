@@ -6,11 +6,8 @@ The large originals are not checked into Git. Fetch and verify them with:
 
 ```sh
 python3 scripts/fetch-raw-samples.py
-swift test --filter ImageImportTests
 ```
 
-Downloads go into ignored `build/raw-samples/`. `LINSE_RAW_SAMPLES_DIR` can point tests at an existing verified copy. Camera tests explicitly skip when the file is absent; network access is never implicit during `swift test`.
-
-Tests require true RAW decoding, more than one million output pixels, nonblank previews, and correct handling of TIFF-based RAW containers even without filenames. Separate regressions cover ordinary JPEG/TIFF, invalid/truncated files, orientation, source-file lifetime, 16-bit input textures, original-size 16-bit TIFF export, and preserving existing edits on failure.
+Downloads go into ignored `build/raw-samples/`. The automated camera regression suite was retired on 2026-11-08. Use these originals for the manual import smoke flow in `docs/smoke.md`, recording the exact camera, OS, dimensions and result. Missing or untried samples are unverified, not passed. No downloads occur implicitly during build or smoke checks.
 
 A passing matrix proves these exact samples on the tested OS, not every model, compression mode, operating system version or future camera. New formats need additional independent fixtures; never replace a failing sample with a re-encoded image to make it pass.

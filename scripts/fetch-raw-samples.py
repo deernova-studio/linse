@@ -8,7 +8,7 @@ import urllib.parse
 import urllib.request
 
 root = Path(__file__).resolve().parents[1]
-manifest = json.loads((root / "Tests/LinseCoreTests/Fixtures/RAW/samples.json").read_text())
+manifest = json.loads((root / "Fixtures/RAW/samples.json").read_text())
 destination = root / "build/raw-samples"
 destination.mkdir(parents=True, exist_ok=True)
 

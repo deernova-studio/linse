@@ -1,9 +1,9 @@
 # GitHub 手动打包与发布
 
-**Release** 是版本说明和安装包的下载页；**Actions** 用于手动触发测试、编译、签名、公证和发布。普通推送和 PR 不运行云端检查或构建。仓库与 Release 保持私有，下载需要有仓库访问权限。
+**Release** 是公开的版本说明和安装包下载页。维护者可通过 **Actions** 手动触发构建、冒烟、签名、公证和发布。普通推送和 PR 不运行云端检查或构建。
 
-- [发布 macOS 版本](https://github.com/ruixingshi/linse/actions/workflows/release.yml)：仅手动触发，支持 M 系列 Mac、macOS 14+。
-- [已有 Release](https://github.com/ruixingshi/linse/releases)：已发布版本不会被覆盖。
+- [发布 macOS 版本](https://github.com/deernova-studio/linse/actions/workflows/release.yml)：仅正式仓库的 `main` 可以手动触发，支持 M 系列 Mac、macOS 14+。
+- [已有 Release](https://github.com/deernova-studio/linse/releases)：已发布版本不会被覆盖。
 
 Mac App Store 使用独立的手动上传工作流，不生成 DMG Release。它需要另外配置商店签名，见 [Mac App Store 说明](app-store.md)；现有 Developer ID 配置无需修改。
 
@@ -51,8 +51,8 @@ App 专用密码可使用有效的已有密码，也可在 [Apple 账号](https:
 1. 在实际 Mac 上完成需要的功能测试，将本次代码提交并推送到 `main`。
 2. 打开 **Actions → 发布 macOS 版本 → Run workflow**，分支选择 **main**。
 3. 填写新版本号和新构建号，例如 `0.2.11`、`13`，可选填更新说明。版本号不带 `v`；不要复用已经发布的版本。
-4. 点击 **Run workflow**。流程依次校验配置、测试与编译、签名应用、公证应用、制作并公证 DMG，最后发布 Release。
-5. 成功后到 [Releases](https://github.com/ruixingshi/linse/releases) 下载 `.dmg`。旁边的 `SHA256SUMS.txt` 用于校验完整性。
+4. 点击 **Run workflow**。流程依次校验配置、构建与冒烟、签名应用、公证应用、制作并公证 DMG，最后发布 Release。
+5. 成功后到 [Releases](https://github.com/deernova-studio/linse/releases) 下载 `.dmg`。旁边的 `SHA256SUMS.txt` 用于校验完整性。
 
 更新说明填写用户可感知的功能变化或问题修复；发布页自动附上适用系统和安装方法。
 
@@ -62,9 +62,9 @@ App 专用密码可使用有效的已有密码，也可在 [Apple 账号](https:
 
 ## 发布时的验证范围
 
-手动发布使用 GitHub 托管的 Apple Silicon macOS 15 和 Xcode 16.4，编译 Mac arm64 Release 和 iOS 共享代码。如果 runner 能提供 Metal GPU，则运行完整 Swift 测试；没有 GPU 时仅运行 AI 协议、配置、XMP、LUT 持久化等不依赖 GPU 的测试，并在执行摘要中说明。
+手动发布使用 GitHub 托管的 Apple Silicon macOS 15 和 Xcode 16.4，编译 Mac arm64 Release 和 iOS 共享代码。具有 Metal GPU 时运行 3 条真实导入、匹配、导出流程冒烟；无 GPU 时明确记录为未执行，不算通过。
 
-自动验证不等于完整产品验收：GPU 渲染、RAW 样片、图片导出和界面交互仍需在实际 Mac 验证；iOS 检查仅覆盖共享代码编译，不代表已在 iPhone / iPad 或模拟器运行。外部 RAW 样片和可选模拟服务未提供时，对应测试会明确跳过。
+仅维护 [8 条关键冒烟用例](smoke.md)，不使用单测框架或测试 target。剩余 5 条人工流程以及 RAW、iPhone / iPad 运行情况需单独验收；共享代码编译不代表设备或模拟器运行通过。
 
 本机也可执行与发布流程相同的检查：
 

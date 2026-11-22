@@ -69,7 +69,7 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: 测试与编译
+      - name: 构建与冒烟
         run: bash scripts/check-ci.sh
       - name: 安装临时签名身份与公证授权
         env:
@@ -98,7 +98,7 @@ jobs:
           retention-days: 7
 
   publish:
-    name: 发布到私有仓库 Release
+    name: 发布到 GitHub Releases
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10

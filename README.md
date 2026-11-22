@@ -1,14 +1,18 @@
 # 临色 · Linse
 
+<img src="macOS/Linse/Assets.xcassets/AppIcon.appiconset/icon-128@2x.png" width="96" height="96" alt="临色图标" />
+
 原生照片调色 App：导入原图与目标风格，匹配颜色，并继续调整、添加蒙版和导出。
 
 本仓库是唯一维护的产品工程，面向 **Apple 芯片（M 系列）的 Mac，macOS 14+** 和 **iPhone / iPad（iOS 17+）**。两端共用 Swift / SwiftUI 与 Metal 实现；旧 TypeScript / Electron App 已退役。
+
+Mac 版可从 [Mac App Store（中国大陆）](https://apps.apple.com/cn/app/id6824873396?mt=12)或 [GitHub Releases](https://github.com/deernova-studio/linse/releases) 下载。iPhone / iPad 版可通过 Xcode 构建。
 
 ## 图片与 RAW 导入
 
 普通图片通过系统图像解码导入；相机 RAW 使用专门的 RAW 解码流程，保留完整尺寸与高精度编辑输入。RAW 解码失败时不会静默使用内嵌小预览，会说明原因并保留已有照片和编辑。iPhone / iPad 可以从相册或“文件”选择图片；需要确定使用 RAW 原始文件时，选择“从文件选择（含 RAW）”。
 
-实际兼容范围取决于设备系统支持的相机型号和压缩方式，不能将支持某种扩展名等同于所有机型都兼容。独立回归样片覆盖 DNG / Apple ProRAW、CR2、CR3、NEF、ARW、RAF、ORF、RW2；来源、下载校验与测试方式见 [RAW 测试矩阵](Tests/LinseCoreTests/Fixtures/RAW/README.md)。目前未提供 RAW 专用显影参数面板。
+实际兼容范围取决于设备系统支持的相机型号和压缩方式，不能将支持某种扩展名等同于所有机型都兼容。独立回归样片覆盖 DNG / Apple ProRAW、CR2、CR3、NEF、ARW、RAF、ORF、RW2；来源、下载校验与测试方式见 [RAW 测试矩阵](Fixtures/RAW/README.md)。目前未提供 RAW 专用显影参数面板。
 
 ## 工程结构
 
@@ -19,7 +23,8 @@
 | `Sources/LinseMac` | macOS App 入口 |
 | `macOS/Linse.xcodeproj` | 启用沙盒的 Mac App Store 工程，引用同一入口与共享 Swift 包 |
 | `iOS/Linse.xcodeproj` | iPhone / iPad App 工程，引用本地 Swift 包 |
-| `Tests` | 核心与编辑流程的回归测试 |
+| `scripts/smoke` | 无测试框架的关键流程冒烟入口 |
+| `Fixtures` | 保留来源记录的历史参考数据与 RAW 样片清单 |
 
 ## 编辑现场与匹配强度
 
@@ -85,7 +90,7 @@ LINSE_VERSION=0.2.11 LINSE_BUILD_NUMBER=13 bash scripts/package.sh --release
 
 ## GitHub 手动打包与发布
 
-GitHub Actions 仅用于手动发布，普通推送和 PR 不触发检查或构建。在 [Actions → 发布 macOS 版本](https://github.com/ruixingshi/linse/actions/workflows/release.yml) 点击 **Run workflow**，填写新版本号和构建号，流程会执行测试与编译、签名、公证和 DMG 校验，再发布到私有仓库的 Release。
+GitHub Actions 仅用于手动发布，普通推送和 PR 不触发检查或构建。在 [Actions → 发布 macOS 版本](https://github.com/deernova-studio/linse/actions/workflows/release.yml) 点击 **Run workflow**，填写新版本号和构建号，流程会执行构建与可运行的冒烟、签名、公证和 DMG 校验，再发布到 GitHub Releases。
 
 首次云端发布需要配置签名证书及公证授权，具体步骤、检查范围和失败恢复见 [GitHub Actions 使用说明](docs/github-actions.md)。
 
@@ -108,10 +113,17 @@ bash scripts/check-ios.sh
 ## 验证与维护
 
 ```sh
-swift test
-swift build -c release --product LinseMac
+bash scripts/check-ci.sh
 ```
 
 修改 `Sources/LinseCore/Shaders.metal` 后，先运行 `python3 scripts/embed-shader.py` 更新内嵌源码，再进行相关验证。
 
-构建和测试不依赖 Node.js、Electron 或其他工程目录。`Tests/LinseCoreTests/Fixtures/Electron` 仅保留旧版生成的固定颜色参考数据，用来检测原生渲染回归；来源与容差见[参考数据说明](Tests/LinseCoreTests/Fixtures/README.md)。
+构建和冒烟不依赖 Node.js、Electron 或其他工程目录。`Fixtures/Electron` 仅保留旧版生成的固定颜色参考数据，用来检测原生渲染回归；来源与当前用途见[参考数据说明](Fixtures/README.md)。
+
+本仓库不再维护单元测试、测试 target 或覆盖率门禁。仅保留 [8 条关键冒烟用例](docs/smoke.md)，其中 3 条自动执行、5 条人工验收；未执行项必须明确报告。`docs/plans` 中既有测试记录是历史验证结果，不是当前执行要求。
+
+## 图标与许可
+
+[LinseIcon.svg](Assets/LinseIcon.svg) 是图标源文件。使用 `xcrun swift scripts/render-app-icon.swift` 更新 macOS、iOS 和 DMG 打包使用的图标资源。
+
+项目采用 [MIT 许可证](LICENSE)。文档引用的第三方样片遵循其原始许可。

@@ -8,8 +8,9 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 public struct IOSRootView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var state: AppState
-    @Environment(\.horizontalSizeClass) private var hSize
+    @Environment(\.dynamicTypeSize) private var textSize
     @State private var pick: PhotosPickerItem?
     @State private var photoSlot: AppState.SlotKind?
     @State private var fileSlot: AppState.SlotKind?
@@ -21,8 +22,8 @@ public struct IOSRootView: View {
     public init(state: AppState) { self.state = state }
 
     public var body: some View {
-        Group {
-            if hSize == .regular {
+        GeometryReader { geometry in
+            if geometry.size.width >= 1000 && !textSize.isAccessibilitySize {
                 HStack(spacing: 0) {
                     SidebarView(state: state).frame(width: 300)
                     Divider()
@@ -34,25 +35,27 @@ public struct IOSRootView: View {
                 }
             } else {
                 VStack(spacing: 0) {
-                    stage.frame(maxHeight: .infinity)
+                    stage.frame(height: state.source == nil ? max(160, geometry.size.height * 0.65) : max(120, geometry.size.height * 0.32))
                     Divider()
                     slots.padding(.horizontal, 14).padding(.vertical, 10)
                     if state.source != nil {
                         Divider()
-                        bottom.frame(height: 330)
+                        bottom.frame(maxHeight: .infinity)
                     }
                 }
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) { topBar }
-        .background(Color.appBackground)
+        .background(Color.canvas)
+        .tint(Color.brandAccent)
+        .foregroundStyle(Color.ink)
         .overlay(alignment: .top) {
             if let t = state.toast {
-                Text(t).font(.system(size: 13)).padding(.horizontal, 14).padding(.vertical, 8)
-                    .background(.regularMaterial, in: Capsule()).padding(.top, 60).transition(.opacity)
+                Text(t).font(AppTypography.ui(13)).padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Color.surfaceRaised, in: Capsule()).padding(.top, 60).transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.15), value: state.toast)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: state.toast)
         .preferredColorScheme(state.colorScheme)
         .confirmationDialog("导入图片", isPresented: Binding(get: { state.importChoice != nil }, set: { if !$0 { state.importChoice = nil } }),
                             titleVisibility: .visible, presenting: state.importChoice) { kind in
@@ -87,12 +90,19 @@ public struct IOSRootView: View {
     var topBar: some View {
         HStack(spacing: 10) {
             LogoMark().frame(width: 20, height: 20)
-            Text("临色").font(.system(size: 16, weight: .medium))
+            Text("临色").font(AppTypography.ui(16, weight: .medium))
             Spacer()
-            Picker("", selection: $state.viewMode) {
-                ForEach(ViewMode.allCases, id: \.self) { Text($0.rawValue) }
+            if textSize.isAccessibilitySize {
+                Picker("查看方式", selection: $state.viewMode) {
+                    ForEach(ViewMode.allCases, id: \.self) { Text($0.rawValue) }
+                }
+                .pickerStyle(.menu).disabled(state.source == nil)
+            } else {
+                Picker("查看方式", selection: $state.viewMode) {
+                    ForEach(ViewMode.allCases, id: \.self) { Text($0.rawValue) }
+                }
+                .pickerStyle(.segmented).frame(maxWidth: 200).disabled(state.source == nil)
             }
-            .pickerStyle(.segmented).frame(width: 156).disabled(state.source == nil)
             Menu {
                 Section("导出") {
                     Button { saveToPhotos() } label: { Label("存到相册", systemImage: "photo.on.rectangle") }
@@ -114,11 +124,11 @@ public struct IOSRootView: View {
                         .disabled(state.source == nil)
                 }
             } label: {
-                Image(systemName: "ellipsis.circle").font(.system(size: 19, weight: .light)).frame(width: 36, height: 36)
+                Image(systemName: "ellipsis.circle").font(.title3).frame(width: 44, height: 44)
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 6)
-        .background(Color.appBackground)
+        .background(.bar)
         .overlay(alignment: .bottom) { Divider() }
     }
 
@@ -131,27 +141,36 @@ public struct IOSRootView: View {
     }
 
     var slots: some View {
+        ViewThatFits(in: .horizontal) {
+            slotRow
+            VStack(spacing: 8) { slotPair; actions }
+        }
+    }
+
+    var slotPair: some View {
         HStack(spacing: 12) {
             MiniSlot(title: "原图", slot: state.source) { state.inspectOrImport(.source) }
-            Image(systemName: "arrow.left").font(.system(size: 11, weight: .light)).foregroundStyle(.secondary)
+            Image(systemName: "arrow.left").font(AppTypography.ui(11, weight: .light)).foregroundStyle(Color.inkSecondary)
             MiniSlot(title: "目标图", slot: state.target) { state.inspectOrImport(.target) }
-            Spacer(minLength: 4)
-            actions
         }
+    }
+
+    var slotRow: some View {
+        HStack(spacing: 12) { slotPair; Spacer(minLength: 4); actions }
     }
 
     var actions: some View {
         HStack(spacing: 8) {
             Button { state.runMatch(useAI: true) } label: {
-                Label("AI 辅助匹配", systemImage: "sparkles").labelStyle(.iconOnly).frame(width: 22, height: 22)
+                Label("AI 辅助匹配", systemImage: "sparkles").labelStyle(.iconOnly).frame(minWidth: 24, minHeight: 32)
             }
                 .buttonStyle(.bordered)
                 .disabled(state.source == nil || state.target == nil || state.busy != nil)
-            Button { state.runMatch() } label: { Text("匹配").font(.system(size: 14, weight: .medium)).padding(.horizontal, 6) }
+            Button { state.runMatch() } label: { Text("匹配").font(AppTypography.ui(14, weight: .medium)).padding(.horizontal, 6).frame(minHeight: 32) }
                 .buttonStyle(.bordered)
                 .disabled(state.source == nil || state.target == nil || state.busy != nil)
         }
-        .tint(.primary)
+        .tint(Color.brandAccent)
     }
 
     var bottom: some View {
@@ -255,16 +274,16 @@ struct MiniSlot: View {
         VStack(spacing: 4) {
             Button(action: action) {
                 ZStack {
-                    Rectangle().fill(Color.primary.opacity(0.05))
+                    Rectangle().fill(Color.surfaceSunken)
                     if let t = slot?.thumb { Image(cg: t).resizable().scaledToFill() }
-                    else { Image(systemName: "plus").font(.system(size: 13, weight: .light)).foregroundStyle(.secondary) }
+                    else { Image(systemName: "plus").font(AppTypography.ui(13, weight: .light)).foregroundStyle(Color.inkSecondary) }
                 }
                 .frame(width: 52, height: 52).clipped()
-                .overlay(Rectangle().stroke(Color.primary.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: slot == nil ? [3, 3] : [])))
+                .overlay(Rectangle().stroke(Color.lineControl, style: StrokeStyle(lineWidth: 1, dash: slot == nil ? [3, 3] : [])))
             }
-            .buttonStyle(NeutralButtonStyle(cornerRadius: 0, outlined: true))
+            .buttonStyle(SurfaceButtonStyle())
             .accessibilityLabel(slot == nil ? "导入\(title)" : "查看\(title)")
-            Text(title).font(.system(size: 10)).foregroundStyle(.secondary)
+            Text(title).font(AppTypography.ui(10)).foregroundStyle(Color.inkSecondary)
                 .accessibilityHidden(true)
         }
     }

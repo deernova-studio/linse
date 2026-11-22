@@ -29,6 +29,7 @@ struct SidebarView: View {
                 if tab == 0 { ChangesList(state: state).padding(14) } else { PresetsView(state: state).padding(14) }
             }
         }
+        .background(Color.surface)
     }
 
     func drop(_ providers: [NSItemProvider], _ k: AppState.SlotKind) -> Bool {
@@ -45,20 +46,20 @@ struct SlotView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Button(action: action) {
-                Rectangle().fill(Color.primary.opacity(0.04))
+                Rectangle().fill(Color.fillHover)
                     .frame(height: 84)
                     // 图片只填充已分配的槽位，不能用自身宽高比撑大侧栏。
                     .overlay {
                         if let t = slot?.thumb { Image(cg: t).resizable().scaledToFill() }
-                        else { Image(systemName: "plus").font(.body).foregroundStyle(.secondary) }
+                        else { Image(systemName: "plus").font(.body).foregroundStyle(Color.inkSecondary) }
                     }
                     .clipped()
-                    .overlay(Rectangle().stroke(Color.primary.opacity(0.14), style: StrokeStyle(lineWidth: 1, dash: slot == nil ? [3, 3] : [])))
+                    .overlay(Rectangle().stroke(Color.line, style: StrokeStyle(lineWidth: 1, dash: slot == nil ? [3, 3] : [])))
             }
-            .buttonStyle(NeutralButtonStyle(cornerRadius: 0, outlined: true))
+            .buttonStyle(SurfaceButtonStyle())
             .accessibilityLabel(slot == nil ? "导入\(title)" : "查看\(title)")
             .help(slot.map { "查看\(title)：\($0.name)" } ?? "导入\(title)")
-            Text(title).font(AppTypography.sectionTitle).foregroundStyle(.primary)
+            Text(title).font(AppTypography.sectionTitle).foregroundStyle(Color.ink)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityHidden(true)
         }
@@ -75,27 +76,27 @@ struct ChangesList: View {
         VStack(alignment: .leading, spacing: 0) {
             if let s = state.summary {
                 HStack {
-                    Text(s.source).font(.system(size: 12))
+                    Text(s.source).font(AppTypography.ui(12))
                     Spacer()
-                    if s.stale { Text("图已更换").font(.system(size: 10)).foregroundStyle(.orange) }
-                    else if s.secs > 0 { Text(String(format: "%.1f 秒", s.secs)).font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary) }
+                    if s.stale { Text("图已更换").font(AppTypography.ui(10)).foregroundStyle(Color.warning) }
+                    else if s.secs > 0 { Text(String(format: "%.1f 秒", s.secs)).font(AppTypography.ui(11).monospacedDigit()).foregroundStyle(Color.inkSecondary) }
                 }
                 .padding(.bottom, 10)
                 if let ai = s.ai { AINotes(ai: ai, corrections: s.aiCorrections).padding(.bottom, 12) }
             }
             if rows.isEmpty {
-                Text("还没有改动").font(.system(size: 12)).foregroundStyle(.tertiary).frame(maxWidth: .infinity, alignment: .center).padding(.top, 24)
+                Text("还没有改动").font(AppTypography.ui(12)).foregroundStyle(Color.inkTertiary).frame(maxWidth: .infinity, alignment: .center).padding(.top, 24)
             }
             ForEach(Array(rows.enumerated()), id: \.offset) { _, r in
                 if r.1.isEmpty { GroupTitle(r.0) }
                 else {
                     HStack {
-                        Text(r.0).font(.system(size: 12)).foregroundStyle(.secondary)
+                        Text(r.0).font(AppTypography.ui(12)).foregroundStyle(Color.inkSecondary)
                         Spacer()
-                        Text(r.1).font(.system(size: 12).monospacedDigit())
+                        Text(r.1).font(AppTypography.ui(12).monospacedDigit())
                     }
-                    .frame(height: 22)
-                    .overlay(alignment: .bottom) { Rectangle().fill(Color.primary.opacity(0.06)).frame(height: 1) }
+                    .frame(minHeight: AppMetrics.rowHeight)
+                    .overlay(alignment: .bottom) { Rectangle().fill(Color.line).frame(height: 1) }
                 }
             }
         }
@@ -144,36 +145,36 @@ struct AINotes: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if !ai.styleSummary.isEmpty { Text(ai.styleSummary).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true) }
+            if !ai.styleSummary.isEmpty { Text(ai.styleSummary).font(AppTypography.ui(12)).fixedSize(horizontal: false, vertical: true) }
             if !ai.contentNotStyle.isEmpty {
-                Text("不当作风格：" + ai.contentNotStyle.joined(separator: "、")).font(.system(size: 11)).foregroundStyle(.secondary)
+                Text("不当作风格：" + ai.contentNotStyle.joined(separator: "、")).font(AppTypography.ui(11)).foregroundStyle(Color.inkSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if !ai.reasons.isEmpty || !corrections.isEmpty {
                 Button { withAnimation(.easeOut(duration: 0.15)) { open.toggle() } } label: {
                     HStack(spacing: 4) {
-                        Text(open ? "收起 AI 判断" : "展开 AI 判断").font(.system(size: 11))
-                        Image(systemName: "chevron.down").font(.system(size: 8)).rotationEffect(.degrees(open ? 180 : 0))
+                        Text(open ? "收起 AI 判断" : "展开 AI 判断").font(AppTypography.ui(11))
+                        Image(systemName: "chevron.down").font(AppTypography.ui(8)).rotationEffect(.degrees(open ? 180 : 0))
                     }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Color.inkSecondary)
                 }
                 .buttonStyle(NeutralButtonStyle())
             }
             if open {
                 ForEach(Array(ai.reasons.enumerated()), id: \.offset) { _, r in
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(r.slider).font(.system(size: 11)).foregroundStyle(.secondary)
-                        Text(r.why).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
+                        Text(r.slider).font(AppTypography.ui(11)).foregroundStyle(Color.inkSecondary)
+                        Text(r.why).font(AppTypography.ui(11.5)).fixedSize(horizontal: false, vertical: true)
                     }
                 }
                 if !corrections.isEmpty {
                     GroupTitle("AI 初值 → 实测后")
-                    ForEach(corrections, id: \.self) { Text($0).font(.system(size: 11).monospacedDigit()) }
+                    ForEach(corrections, id: \.self) { Text($0).font(AppTypography.ui(11).monospacedDigit()) }
                 }
             }
         }
         .padding(10)
-        .overlay(Rectangle().stroke(Color.primary.opacity(0.12), lineWidth: 1))
+        .overlay(Rectangle().stroke(Color.line, lineWidth: 1))
     }
 }
 
@@ -188,14 +189,14 @@ struct PresetsView: View {
         VStack(alignment: .leading, spacing: 12) {
             if naming {
                 HStack {
-                    TextField("预设名称", text: $newName).textFieldStyle(.plain).font(.system(size: 12))
+                    TextField("预设名称", text: $newName).textFieldStyle(.plain).font(AppTypography.ui(12))
                         .onSubmit { save() }
-                    Button("存") { save() }.buttonStyle(NeutralButtonStyle()).font(.system(size: 12))
-                    Button("取消") { naming = false }.buttonStyle(NeutralButtonStyle()).font(.system(size: 12)).foregroundStyle(.secondary)
+                    Button("存") { save() }.buttonStyle(NeutralButtonStyle()).font(AppTypography.ui(12))
+                    Button("取消") { naming = false }.buttonStyle(NeutralButtonStyle()).font(AppTypography.ui(12)).foregroundStyle(Color.inkSecondary)
                 }
-                .padding(.vertical, 4).overlay(alignment: .bottom) { Rectangle().fill(Color.primary.opacity(0.2)).frame(height: 1) }
+                .padding(.vertical, 4).overlay(alignment: .bottom) { Rectangle().fill(Color.lineControl).frame(height: 1) }
             } else {
-                Button { newName = ""; naming = true } label: { Label("把当前调整存为预设", systemImage: "plus").font(.system(size: 12)) }
+                Button { newName = ""; naming = true } label: { Label("把当前调整存为预设", systemImage: "plus").font(AppTypography.ui(12)) }
                     .buttonStyle(NeutralButtonStyle()).disabled(state.source == nil)
             }
             if !state.userPresets.isEmpty {
@@ -210,22 +211,22 @@ struct PresetsView: View {
     func save() { state.saveCurrentAsPreset(name: newName.trimmingCharacters(in: .whitespaces)); naming = false }
 
     func grid(_ list: [Preset]) -> some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 10), count: columns), spacing: 12) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: columns == 2 ? 104 : 140), spacing: 12)], spacing: 12) {
             ForEach(list) { p in
                 Button { state.applyPreset(p) } label: {
                     VStack(alignment: .leading, spacing: 5) {
-                        Rectangle().fill(Color.primary.opacity(0.05))
+                        Rectangle().fill(Color.surfaceSunken)
                             .frame(height: 74)
                             .overlay {
                                 if let img = state.thumbnail(for: p) { Image(cg: img).resizable().scaledToFill() }
                             }
                             .clipped()
-                            .overlay(Rectangle().stroke(Color.primary.opacity(0.12), lineWidth: 1))
-                        Text(p.name).font(.system(size: 11)).lineLimit(1)
+                            .overlay(Rectangle().stroke(Color.line, lineWidth: 1))
+                        Text(p.name).font(AppTypography.ui(11)).fixedSize(horizontal: false, vertical: true)
                     }
                     .contentShape(Rectangle())
                 }
-                .buttonStyle(NeutralButtonStyle(cornerRadius: 0, outlined: true))
+                .buttonStyle(SurfaceButtonStyle())
                 .contextMenu { if !p.builtin { Button("删除") { state.deletePreset(p) } } }
             }
         }

@@ -18,18 +18,7 @@ struct ImageInspectionView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("\(kind.title)预览").font(.headline)
-                Spacer()
-                Button { dismiss() } label: {
-                    Label("关闭预览", systemImage: "xmark")
-                        .labelStyle(.iconOnly)
-                        .frame(width: 44, height: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(NeutralButtonStyle()).keyboardShortcut(.cancelAction)
-            }
-            .padding(.leading, 20).padding(.trailing, 8).padding(.vertical, 6)
+            SheetHeader(title: "\(kind.title)预览", closeLabel: "关闭预览") { dismiss() }
             Divider()
             if let slot = state.slot(for: kind) {
                 GeometryReader { geometry in
@@ -49,10 +38,10 @@ struct ImageInspectionView: View {
             HStack(spacing: 12) {
                 if let busy = state.busy {
                     ProgressView().controlSize(.small)
-                    Text(busy).font(.callout).foregroundStyle(.secondary)
+                    Text(busy).font(.callout).foregroundStyle(Color.inkSecondary)
                 }
                 if let replacementError {
-                    Text(replacementError).font(.callout).foregroundStyle(.red)
+                    Text(replacementError).font(.callout).foregroundStyle(Color.danger)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
@@ -61,7 +50,7 @@ struct ImageInspectionView: View {
                     replacementError = nil
                     choosingReplacement = true
                 }
-                .buttonStyle(.bordered).controlSize(.large).tint(.primary)
+                .buttonStyle(.bordered).controlSize(.regular).tint(Color.brandAccent)
                 .disabled(state.busy != nil)
                 .help(state.busy == nil ? "重新选择\(kind.title)" : "正在处理，请稍候")
                 #else
@@ -77,14 +66,15 @@ struct ImageInspectionView: View {
                 } label: {
                     Label(importing ? "正在读取图片…" : "切换图片", systemImage: "arrow.triangle.2.circlepath").frame(minHeight: 32)
                 }
-                .buttonStyle(.bordered).tint(.primary).disabled(state.busy != nil || importing)
+                .buttonStyle(.bordered).tint(Color.brandAccent).disabled(state.busy != nil || importing)
                 #endif
-                Button("确认") { dismiss() }
-                    .buttonStyle(.bordered).controlSize(.large).tint(.primary)
+                Button("返回编辑") { dismiss() }
+                    .buttonStyle(.bordered).controlSize(.regular).tint(Color.brandAccent)
             }
-            .padding(20)
+            .padding(Deernova.space4)
         }
-        .background(Color.appBackground)
+        .tint(Color.brandAccent)
+        .accentColor(Color.brandAccent)
         #if os(macOS)
         .frame(width: 900, height: 600)
         #else

@@ -19,11 +19,11 @@ struct CurveEditor: View {
                     grid.move(to: CGPoint(x: x, y: 0)); grid.addLine(to: CGPoint(x: x, y: size.height))
                     grid.move(to: CGPoint(x: 0, y: y)); grid.addLine(to: CGPoint(x: size.width, y: y))
                 }
-                ctx.stroke(grid, with: .color(.primary.opacity(0.08)), lineWidth: 1)
-                ctx.stroke(Path(CGRect(origin: .zero, size: size)), with: .color(.primary.opacity(0.18)), lineWidth: 1)
+                ctx.stroke(grid, with: .color(.line), lineWidth: 1)
+                ctx.stroke(Path(CGRect(origin: .zero, size: size)), with: .color(.lineControl), lineWidth: 1)
                 var diag = Path(); diag.move(to: CGPoint(x: 0, y: size.height)); diag.addLine(to: CGPoint(x: size.width, y: 0))
-                ctx.stroke(diag, with: .color(.primary.opacity(0.1)), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-                for o in others where !Curve.isIdentity(o) { ctx.stroke(curvePath(o, size), with: .color(.primary.opacity(0.18)), lineWidth: 1) }
+                ctx.stroke(diag, with: .color(.line), style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                for o in others where !Curve.isIdentity(o) { ctx.stroke(curvePath(o, size), with: .color(.inkTertiary), lineWidth: 1) }
                 ctx.stroke(curvePath(points, size), with: .color(color), lineWidth: 1.2)
                 for p in points {
                     let c = toView(p, size)

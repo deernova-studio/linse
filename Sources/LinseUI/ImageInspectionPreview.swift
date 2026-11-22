@@ -9,7 +9,7 @@ struct ImageInspectionPreview: View {
     @State private var failure: String?
 
     var body: some View {
-        Rectangle().fill(Color.primary.opacity(0.03))
+        Rectangle().fill(Color.surfaceSunken)
             .overlay {
                 if let image = preview ?? slot.thumb {
                     Image(image, scale: 1, label: Text("图片完整预览"))
@@ -19,10 +19,10 @@ struct ImageInspectionPreview: View {
             .overlay(alignment: .bottom) {
                 if loading {
                     ProgressView("正在加载预览…").controlSize(.small)
-                        .padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6)).padding(16)
+                        .padding(12).background(Color.surfaceRaised, in: RoundedRectangle(cornerRadius: Deernova.cardRadius)).padding(16)
                 } else if let failure {
                     Text(failure).font(.callout).multilineTextAlignment(.center)
-                        .padding(12).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6)).padding(16)
+                        .padding(12).background(Color.surfaceRaised, in: RoundedRectangle(cornerRadius: Deernova.cardRadius)).padding(16)
                 }
             }
             .clipped()

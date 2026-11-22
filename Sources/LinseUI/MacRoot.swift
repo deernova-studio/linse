@@ -49,6 +49,7 @@ public struct LinseCommands: Commands {
 }
 
 public struct MacRootView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @ObservedObject var state: AppState
     public init(state: AppState) { self.state = state }
 
@@ -62,61 +63,64 @@ public struct MacRootView: View {
                 PanelView(state: state).frame(width: 320)
             }
         }
-        .background(Color.appBackground)
+        .background(Color.canvas)
+        .tint(Color.brandAccent)
+        .foregroundStyle(Color.ink)
         .overlay(alignment: .bottom) {
             if let t = state.toast {
-                Text(t).font(.system(size: 12)).padding(.horizontal, 14).padding(.vertical, 7)
-                    .background(.regularMaterial, in: Capsule()).overlay(Capsule().stroke(Color.primary.opacity(0.1)))
+                Text(t).font(AppTypography.ui(12)).padding(.horizontal, 14).padding(.vertical, 7)
+                    .background(Color.surfaceRaised, in: Capsule()).overlay(Capsule().stroke(Color.line))
                     .padding(.bottom, 24).transition(.opacity)
             }
         }
-        .animation(.easeOut(duration: 0.15), value: state.toast)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: state.toast)
         .toolbar {
             ToolbarItem(placement: .navigation) {
-                HStack(spacing: 8) {
-                    LogoMark().frame(width: 18, height: 18)
-                    Text("临色").font(.system(size: 13, weight: .medium))
-                }
+                LogoMark().frame(width: 24, height: 24).help("临色")
             }
+            .withoutSharedBackground()
             ToolbarItem(placement: .principal) {
                 Picker("查看方式", selection: $state.viewMode) {
                     ForEach(ViewMode.allCases, id: \.self) { Text($0.rawValue) }
                 }
-                .labelsHidden().pickerStyle(.segmented).frame(width: 180).disabled(state.source == nil)
+                .labelsHidden().pickerStyle(.segmented).controlSize(.regular)
+                .fixedSize().disabled(state.source == nil)
             }
+            .withoutSharedBackground()
+            // 使用系统工具栏控件，让尺寸、悬停轮廓和玻璃背景由同一套样式管理。
             ToolbarItemGroup(placement: .primaryAction) {
                 Button("切换外观", systemImage: state.theme.icon) { state.cycleTheme() }
-                    .labelStyle(.iconOnly).buttonStyle(MacToolbarButtonStyle(iconOnly: true))
+                    .labelStyle(.iconOnly)
                     .help("外观：\(state.theme.label)")
                 Button("AI 设置", systemImage: "gearshape") { state.showAISettings = true }
-                    .labelStyle(.iconOnly).buttonStyle(MacToolbarButtonStyle(iconOnly: true))
+                    .labelStyle(.iconOnly)
                     .help("AI 设置")
                 Button("全部复位", systemImage: "arrow.counterclockwise") { state.reset() }
-                    .labelStyle(.iconOnly).buttonStyle(MacToolbarButtonStyle(iconOnly: true))
+                    .labelStyle(.iconOnly)
                     .help(state.source == nil ? "先导入原图" : "全部复位")
                     .disabled(state.source == nil || state.busy != nil)
-                Menu {
+                Menu("导出") {
                     ForEach(ExportFormat.allCases, id: \.self) { f in Button(f.label) { state.saveImage(f) } }
                     Divider()
                     Button("3D LUT（.cube）") { state.saveLUT() }
                     Button("Lightroom 预设（.xmp）") { state.saveXMP() }
-                } label: {
-                    HStack(spacing: 4) {
-                        Text("导出")
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 9, weight: .semibold)).accessibilityHidden(true)
-                    }
                 }
-                .menuStyle(.button).buttonStyle(MacToolbarButtonStyle())
-                .menuIndicator(.hidden).fixedSize()
                 .help(state.source == nil ? "先导入原图" : state.busy != nil ? "正在处理，请稍候" : "导出照片、LUT 或预设")
                 .disabled(state.source == nil || state.busy != nil)
-                Button { state.runMatch(useAI: true) } label: { Label("AI 辅助匹配", systemImage: "sparkles").labelStyle(.titleAndIcon) }
-                    .buttonStyle(MacToolbarButtonStyle())
+                Button { state.runMatch(useAI: true) } label: {
+                    HStack(alignment: .center, spacing: 6) {
+                        Image(systemName: "sparkles")
+                            .frame(width: 16, height: 16)
+                            .accessibilityHidden(true)
+                        Text("AI 辅助匹配")
+                    }
+                    .font(AppTypography.ui(13, weight: .medium))
+                    .fixedSize()
+                }
+                    .accessibilityLabel("AI 辅助匹配")
                     .help(matchUnavailableReason ?? "先让视觉模型看图给出初值和判断，再用计算精确对齐")
                     .disabled(state.source == nil || state.target == nil || state.busy != nil)
                 Button("计算匹配") { state.runMatch() }
-                    .buttonStyle(MacToolbarButtonStyle())
                     .help(matchUnavailableReason ?? "纯计算：统计两张图的颜色并反推滑块，离线可用")
                     .disabled(state.source == nil || state.target == nil || state.busy != nil)
             }
@@ -137,6 +141,18 @@ public struct MacRootView: View {
         if state.source == nil { return state.target == nil ? "先导入原图和目标风格图" : "先导入原图" }
         if state.target == nil { return "先导入目标风格图" }
         return nil
+    }
+}
+
+private extension ToolbarContent {
+    /// Branding needs no action capsule; the picker already draws its own surface.
+    @ToolbarContentBuilder
+    func withoutSharedBackground() -> some ToolbarContent {
+        if #available(macOS 26.0, *) {
+            self.sharedBackgroundVisibility(.hidden)
+        } else {
+            self
+        }
     }
 }
 
